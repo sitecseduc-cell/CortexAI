@@ -1,5 +1,5 @@
 import { Loader2, ListChecks, Brain, CheckCircle, X, AlertTriangle, FileText, Upload } from 'lucide-vue-next';
-
+import { z } from 'zod';
 /**
  * Helper seguro para parsear JSON do Firestore.
  * Evita que a aplicação quebre se o JSON vier nulo ou mal formatado.
@@ -85,3 +85,4 @@ export const getStatusDisplay = (status) => {
       animate: '' 
   };
 };
+

@@ -9,4 +9,5 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-export { db, auth };
+// Apenas UMA linha de export contendo tudo:
+export { db, auth, app };

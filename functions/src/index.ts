@@ -173,3 +173,41 @@ export const generateDraft = onCall({ cors: true }, async (request) => {
 });
 
 // (Mantenha o chatJuridico existente se desejar, ou melhore com RAG futuramente)
+// ... (mantenha todo o código anterior)
+
+// Adicione isto no final do arquivo index.ts:
+
+export const callGeminiAgent = onCall({ cors: true }, async (request) => {
+    const { content, systemInstruction, schema } = request.data;
+
+    // Configura o modelo (suporta JSON Schema se fornecido)
+    const generationConfig: any = {};
+    if (schema) {
+        try {
+            generationConfig.responseMimeType = "application/json";
+            generationConfig.responseSchema = JSON.parse(schema);
+        } catch (e) {
+            logger.warn("Schema inválido fornecido, ignorando validação estrita.", e);
+        }
+    }
+
+    const model = genAI.getGenerativeModel({ 
+        model: MODEL_NAME,
+        systemInstruction: systemInstruction,
+        generationConfig: generationConfig
+    });
+
+    try {
+        const result = await model.generateContent(content);
+        const responseText = result.response.text();
+        
+        // Retorna no formato { data: ... } para casar com o geminiService.js
+        // O frontend espera result.data.data
+        return { 
+            data: schema ? JSON.parse(responseText) : responseText 
+        };
+    } catch (error) {
+        logger.error("Erro na chamada direta do Gemini:", error);
+        throw new HttpsError('internal', 'Erro ao processar solicitação com IA.');
+    }
+});

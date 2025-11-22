@@ -1,15 +1,13 @@
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed } from 'vue';
 import { useAuth } from '@/composables/useAuth';
 import { useFirestoreCollection } from '@/composables/useFirestore';
-import { useSeeder } from '@/composables/useSeeder'; // Importante para criar as regras
+import { useSeeder } from '@/composables/useSeeder';
 import { useToastStore } from '@/stores/toast';
-import { geminiApiService } from '@/services/geminiService';
-import { doc, setDoc, deleteDoc, collection } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, collection, updateDoc } from 'firebase/firestore';
 import { db } from '@/libs/firebase';
-import { safeParse } from '@/utils/helpers';
 
-// Ícones e Componentes
+// Componentes
 import { LayoutDashboard, FileText, Shield } from 'lucide-vue-next';
 import Header from '@/components/layout/Header.vue';
 import Sidebar from '@/components/layout/Sidebar.vue';
@@ -21,7 +19,7 @@ import ToolsView from './ToolsView.vue';
 import SettingsView from './SettingsView.vue';
 
 // --- ESTADO ---
-const { user, isAuthReady } = useAuth();
+const { user } = useAuth();
 const toastStore = useToastStore();
 const currentView = ref('dashboard');
 const selectedDocId = ref(null);
@@ -29,106 +27,33 @@ const isUploadModalOpen = ref(false);
 
 const appId = 'default-autonomous-agent';
 
-// --- CORREÇÃO DO ERRO CRÍTICO ---
-// O path deve terminar em 'rules'. O seeder usará isso para criar a coleção.
+// Paths
 const docsPath = computed(() => user.value ? `artifacts/${appId}/users/${user.value.uid}/intelligent_platform_docs` : null);
 const rulesPath = computed(() => user.value ? `artifacts/${appId}/users/${user.value.uid}/rules` : null);
-const servidoresPath = computed(() => user.value ? `artifacts/${appId}/users/${user.value.uid}/servidores` : null);
 
-// --- DADOS ---
+// Dados (Reativos via Firestore)
 const { data: documents } = useFirestoreCollection(docsPath);
 const { data: rules } = useFirestoreCollection(rulesPath);
-const { data: servidores } = useFirestoreCollection(servidoresPath);
 
-// Popula o banco com regras padrão se estiver vazio
+// Seed inicial
 useSeeder(rulesPath);
 
-// --- LÓGICA DE ORQUESTRAÇÃO (AGENTE) ---
-// 1. IDP
-const startIDPChain = async (docToProcess) => {
-    const docRef = doc(db, docsPath.value, docToProcess.id);
-    try {
-      await setDoc(docRef, { status: 'Processing IDP' }, { merge: true });
-      const mlOutput = await geminiApiService.callGeminiAPIForProcessing(docToProcess.content);
-      await setDoc(docRef, { 
-        status: 'Enriquecimento Pendente', 
-        idpResult: JSON.stringify(mlOutput.idpResult), 
-        nlpResult: JSON.stringify(mlOutput.nlpResult) 
-      }, { merge: true });
-    } catch (error) {
-      await setDoc(docRef, { status: 'Failed' }, { merge: true });
-    }
-};
+// --- AÇÕES ---
 
-// 2. Enriquecimento
-const executeEnrichment = async (docToProcess) => {
-    const docRef = doc(db, docsPath.value, docToProcess.id);
-    try {
-        const idpData = safeParse(docToProcess.idpResult);
-        const personName = idpData?.keyFields?.find(f => f.field === "PESSOA" || f.field === "Nome")?.value;
-        let enrichedData = {};
-        if (personName && servidores.value.length) {
-            const servidor = servidores.value.find(s => s.nome && personName.includes(s.nome.split(' ')[0]));
-            if (servidor) enrichedData = { cargo: servidor.cargo, tempo_de_servico: servidor.tempo_de_servico_em_anos, matricula: servidor.matricula };
-        }
-        await setDoc(docRef, { status: 'Validacao Pendente', enrichedData: JSON.stringify(enrichedData) }, { merge: true });
-    } catch (e) {
-        await setDoc(docRef, { status: 'Validacao Pendente', enrichedData: '{}' }, { merge: true });
-    }
-};
-
-// 3. Raciocínio
-const startReasoningChain = async (docToProcess) => {
-    const docRef = doc(db, docsPath.value, docToProcess.id);
-    try {
-         const idpData = safeParse(docToProcess.idpResult);
-         const enrichedData = safeParse(docToProcess.enrichedData);
-         const activeRules = rules.value.filter(r => r.status === 'Ativa').map(r => `- ${r.nome}: ${JSON.stringify(r.condicoes)}`).join('\n');
-         const prompt = `Analise: DADOS: ${JSON.stringify(idpData)} RH: ${JSON.stringify(enrichedData)} REGRAS: ${activeRules}`;
-         const rarResult = await geminiApiService.callGeminiAPIForReasoning(prompt);
-         await setDoc(docRef, { status: rarResult.veredicto?.status || 'Finalizado', rarResult: JSON.stringify(rarResult) }, { merge: true });
-         toastStore.addToast(`Processo ${rarResult.veredicto?.status}!`, 'success');
-    } catch (e) {
-        await setDoc(docRef, { status: 'Failed' }, { merge: true });
-    }
-};
-
-// Callback Validação Humana
-const onHumanValidation = async ({ docId, data }) => {
-    const docRef = doc(db, docsPath.value, docId);
-    await setDoc(docRef, { idpResult: JSON.stringify(data), status: 'Raciocinio Pendente' }, { merge: true });
-    toastStore.addToast('Validado. Agente iniciado!', 'info');
-};
-
-// Watcher Principal
-watch(documents, (newDocs) => {
-    newDocs.forEach(doc => {
-        if (doc.status === 'Uploaded') startIDPChain(doc);
-        else if (doc.status === 'Enriquecimento Pendente') executeEnrichment(doc);
-        else if (doc.status === 'Raciocinio Pendente') startReasoningChain(doc);
-    });
-}, { deep: true });
-
-// --- INTERFACE HANDLERS ---
 const handleStartProcess = async (payload) => {
-    // payload agora contém { processoId, processoNome, fileName, content }
     if(!docsPath.value) return;
-    
     try {
         const colRef = collection(db, docsPath.value);
-        
-        await setDoc(doc(colRef), {
-            name: payload.fileName,     // Nome real do arquivo
-            content: payload.content,   // Conteúdo (lido ou simulado)
-            processo: payload.processoId, // ID correto para ativar as regras
-            status: 'Uploaded',         // Gatilho para iniciar a IA
+        // Apenas criamos o doc. O Cloud Function (onProcessCreated) fará o resto!
+        const docRef = await setDoc(doc(colRef), {
+            name: payload.fileName,
+            content: payload.content,
+            processo: payload.processoId,
+            status: 'Uploaded', // Gatilho do Backend
             timestamp: Date.now()
         });
-        
-        toastStore.addToast(`Upload de ${payload.processoNome} concluído!`, 'success');
+        toastStore.addToast('Upload iniciado. O Agente está processando...', 'info');
         isUploadModalOpen.value = false;
-        
-        // Opcional: Mudar para a aba de documentos automaticamente
         currentView.value = 'documents';
     } catch (e) {
         console.error(e);
@@ -136,8 +61,20 @@ const handleStartProcess = async (payload) => {
     }
 };
 
+// Validação Humana (Único momento que o cliente interfere no fluxo além do upload)
+const onHumanValidation = async ({ docId, data }) => {
+    if(!docsPath.value) return;
+    const docRef = doc(db, docsPath.value, docId);
+    // Atualiza dados corrigidos e muda status para disparar o próximo gatilho no backend
+    await updateDoc(docRef, { 
+        idpResult: JSON.stringify(data), 
+        status: 'Raciocinio Pendente' // Gatilho para onProcessUpdated no backend
+    });
+    toastStore.addToast('Validado! Agente retomando análise...', 'success');
+};
+
 const handleDelete = async (id) => {
-    if(confirm("Excluir?")) {
+    if(confirm("Tem certeza que deseja excluir este processo?")) {
         await deleteDoc(doc(db, docsPath.value, id));
         selectedDocId.value = null;
         currentView.value = 'dashboard';
@@ -146,71 +83,87 @@ const handleDelete = async (id) => {
 </script>
 
 <template>
-  <div class="flex flex-col h-screen bg-slate-950 text-white font-sans">
+  <div class="flex flex-col h-screen bg-slate-950 text-white font-sans overflow-hidden">
     <Header />
 
-    <div class="p-6 bg-slate-950 flex-grow overflow-hidden flex flex-col">
-        
-        <div class="flex space-x-4 mb-4 shrink-0 px-2">
-            <button @click="currentView = 'dashboard'" class="px-4 py-2 rounded-lg text-sm font-bold transition-all" :class="['dashboard', 'documents', 'rules'].includes(currentView) ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20' : 'text-gray-400 hover:bg-slate-800'">
-                Plataforma
+    <div class="flex-grow flex overflow-hidden">
+        <!-- Navegação Lateral Estilo "App" -->
+        <aside class="w-20 bg-slate-900 border-r border-slate-800 flex flex-col items-center py-6 space-y-6 shrink-0 z-30">
+            <button @click="currentView = 'dashboard'" class="p-3 rounded-xl transition-all group relative" :class="currentView === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'">
+                <LayoutDashboard class="w-6 h-6" />
+                <span class="absolute left-14 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap border border-slate-700 pointer-events-none">Dashboard</span>
             </button>
-            <button @click="currentView = 'tools'" class="px-4 py-2 rounded-lg text-sm font-bold transition-all" :class="currentView === 'tools' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20' : 'text-gray-400 hover:bg-slate-800'">
-                Ferramentas
+            <button @click="currentView = 'documents'" class="p-3 rounded-xl transition-all group relative" :class="currentView === 'documents' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'">
+                <FileText class="w-6 h-6" />
+                <span class="absolute left-14 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap border border-slate-700 pointer-events-none">Processos</span>
             </button>
-            <button @click="currentView = 'settings'" class="px-4 py-2 rounded-lg text-sm font-bold transition-all" :class="currentView === 'settings' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20' : 'text-gray-400 hover:bg-slate-800'">
-                Configurações
+            <button @click="currentView = 'rules'" class="p-3 rounded-xl transition-all group relative" :class="currentView === 'rules' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'">
+                <Shield class="w-6 h-6" />
+                <span class="absolute left-14 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap border border-slate-700 pointer-events-none">Regras</span>
             </button>
-        </div>
+            
+            <div class="flex-grow"></div>
+            
+            <!-- Ferramentas e Config no rodapé da sidebar -->
+            <button @click="currentView = 'tools'" class="p-3 rounded-xl transition-all group relative" :class="currentView === 'tools' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800'">
+                 <!-- Ícone genérico para ferramentas -->
+                 <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            </button>
+            <button @click="currentView = 'settings'" class="p-3 rounded-xl transition-all group relative" :class="currentView === 'settings' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800'">
+                 <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+        </aside>
 
-        <div v-if="currentView === 'tools'" class="flex-grow overflow-hidden bg-slate-800 rounded-xl border border-slate-700 shadow-2xl">
-            <ToolsView />
-        </div>
-
-        <div v-else-if="currentView === 'settings'" class="flex-grow overflow-hidden bg-slate-800 rounded-xl border border-slate-700 shadow-2xl">
-            <SettingsView />
-        </div>
-
-        <div v-else class="flex-grow flex overflow-hidden gap-4">
-            <div class="w-1/4 min-w-80 bg-slate-800 rounded-xl border border-slate-700 flex flex-col overflow-hidden shadow-2xl">
-                <Sidebar 
-                    :documents="documents" 
-                    :selectedId="selectedDocId"
-                    @select="id => { selectedDocId = id; currentView = 'documents'; }" 
-                    @upload="isUploadModalOpen = true"
-                />
+        <!-- Área Principal -->
+        <div class="flex-grow flex overflow-hidden bg-slate-950 relative">
+            
+            <!-- Views de Tela Cheia -->
+            <div v-if="currentView === 'tools'" class="absolute inset-0 p-6 z-20 bg-slate-950">
+                <div class="h-full bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl overflow-hidden">
+                    <ToolsView />
+                </div>
             </div>
 
-            <main class="flex-grow overflow-hidden bg-slate-800 rounded-xl border border-slate-700 flex flex-col shadow-2xl relative">
-                <div class="flex border-b border-slate-700 bg-slate-900/50 shrink-0">
-                    <button @click="currentView = 'dashboard'" class="flex-1 flex items-center justify-center gap-2 p-3 text-sm font-semibold transition-colors" :class="currentView==='dashboard' ? 'text-indigo-400 border-b-2 border-indigo-500 bg-slate-800' : 'text-gray-400 hover:text-white'">
-                        <LayoutDashboard class="w-4 h-4"/> Dashboard
-                    </button>
-                    <button @click="currentView = 'documents'" class="flex-1 flex items-center justify-center gap-2 p-3 text-sm font-semibold transition-colors" :class="currentView==='documents' ? 'text-indigo-400 border-b-2 border-indigo-500 bg-slate-800' : 'text-gray-400 hover:text-white'">
-                        <FileText class="w-4 h-4"/> Processos
-                    </button>
-                    <button @click="currentView = 'rules'" class="flex-1 flex items-center justify-center gap-2 p-3 text-sm font-semibold transition-colors" :class="currentView==='rules' ? 'text-indigo-400 border-b-2 border-indigo-500 bg-slate-800' : 'text-gray-400 hover:text-white'">
-                        <Shield class="w-4 h-4"/> Regras
-                    </button>
+            <div v-if="currentView === 'settings'" class="absolute inset-0 p-6 z-20 bg-slate-950">
+                <div class="h-full bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl overflow-hidden">
+                    <SettingsView />
+                </div>
+            </div>
+
+            <!-- Layout Padrão (Sidebar + Main) -->
+            <div v-if="['dashboard', 'documents', 'rules'].includes(currentView)" class="flex w-full h-full">
+                <!-- Lista de Documentos (Visível apenas em 'documents' ou desktop large se quiser) -->
+                <div v-show="currentView === 'documents'" class="w-80 min-w-[320px] border-r border-slate-800 bg-slate-900 flex flex-col z-10 transition-all">
+                    <Sidebar 
+                        :documents="documents" 
+                        :selectedId="selectedDocId"
+                        @select="id => { selectedDocId = id; }" 
+                        @upload="isUploadModalOpen = true"
+                    />
                 </div>
 
-                <div class="flex-grow overflow-y-auto custom-scrollbar">
-                    <Dashboard v-if="currentView === 'dashboard'" :documents="documents" />
-                    
-                    <DocumentViewer 
-                        v-if="currentView === 'documents'" 
-                        :doc="documents.find(d => d.id === selectedDocId)" 
-                        @validate="onHumanValidation"
-                        @delete="handleDelete"
-                    />
-                    
-                    <RuleManager 
-                        v-if="currentView === 'rules'" 
-                        :rules="rules" 
-                        :rulesCollectionPath="rulesPath"
-                    />
-                </div>
-            </main>
+                <!-- Conteúdo Central -->
+                <main class="flex-grow overflow-hidden flex flex-col relative bg-slate-950">
+                    <!-- Dashboard Overlay -->
+                    <div v-if="currentView === 'dashboard'" class="absolute inset-0 p-6 overflow-y-auto custom-scrollbar">
+                        <Dashboard :documents="documents" />
+                    </div>
+
+                    <!-- Rule Manager Overlay -->
+                    <div v-if="currentView === 'rules'" class="absolute inset-0 p-6 overflow-y-auto custom-scrollbar">
+                        <RuleManager :rules="rules" :rulesCollectionPath="rulesPath" />
+                    </div>
+
+                    <!-- Document Viewer -->
+                    <div v-if="currentView === 'documents'" class="h-full flex flex-col">
+                        <DocumentViewer 
+                            :doc="documents.find(d => d.id === selectedDocId)" 
+                            @validate="onHumanValidation"
+                            @delete="handleDelete"
+                        />
+                    </div>
+                </main>
+            </div>
         </div>
     </div>
     

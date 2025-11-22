@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,45 +6,41 @@
 
 body {
   @apply bg-slate-950 text-white;
-  font-family: 'Inter', sans-serif; /* Fonte original [cite: 45] */
+  font-family: 'Inter', sans-serif;
   margin: 0;
+  overflow: hidden; /* Previne scroll na página inteira */
 }
 
-/* Efeito Neon do Título [cite: 45-47] */
-.neon-glow {
-  text-shadow: 0 0 5px #a78bfa, 0 0 10px #a78bfa;
+/* --- Glassmorphism Utilities --- */
+.glass {
+  @apply bg-slate-900/60 backdrop-blur-md border border-white/10;
 }
 
-/* Botões Primários com Sombra [cite: 47-50] */
-.btn-primary {
-  transition: all 0.3s ease;
-  box-shadow: 0 4px #4f46e5;
-}
-.btn-primary:hover {
-  box-shadow: 0 2px #4f46e5;
-  transform: translateY(2px);
-}
-.btn-primary:disabled {
-  box-shadow: none;
-  transform: none;
-  opacity: 0.5;
+.glass-strong {
+  @apply bg-slate-900/80 backdrop-blur-xl border border-white/10;
 }
 
-/* Animações do original [cite: 50-56] */
-@keyframes fadeIn {
-    from { opacity: 0; transform: scale(0.98); }
-    to { opacity: 1; transform: scale(1); }
-}
-@keyframes slideUp {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+.glass-hover:hover {
+  @apply bg-white/5 border-white/20;
 }
 
-.animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
-.animate-slide-up { animation: slideUp 0.5s ease-out forwards; }
+/* --- Neon & Glows --- */
+.neon-text {
+  text-shadow: 0 0 10px rgba(167, 139, 250, 0.5);
+}
 
-/* Scrollbar fina para ficar igual ao original */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #0f172a; }
-::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #475569; }
+.glow-box {
+  box-shadow: 0 0 20px -5px rgba(99, 102, 241, 0.15);
+}
+
+/* --- Scrollbars --- */
+/* Fina e elegante para áreas de conteúdo */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+}

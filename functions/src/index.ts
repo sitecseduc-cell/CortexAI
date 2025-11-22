@@ -1,105 +1,175 @@
-import { onCall, HttpsError, CallableRequest } from "firebase-functions/v2/https";
+import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
-import { GoogleGenerativeAI, GenerationConfig } from "@google/generative-ai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { initializeApp } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
+
+initializeApp();
+const db = getFirestore();
 
 const API_KEY = process.env.GEMINI_API_KEY || "";
 const genAI = new GoogleGenerativeAI(API_KEY);
 
-// --- 1. PROMPTS SEGUROS (Hardcoded no Backend) ---
+// --- 1. PROMPTS & CONFIG ---
+const MODEL_NAME = "gemini-1.5-flash";
+
 const PROMPTS = {
-  IDP: `Você é um motor de processamento de documentos (IDP) para o governo do Pará. Extraia dados em JSON.`,
-  RAR: `Você é um Agente Especialista em RH Público (Lei 5.810/94). Analise os dados e emita veredito.`,
-  PORTARIA: `Atue como um Redator Oficial. Gere o texto de uma Portaria Governamental baseada na aprovação deste processo. Use linguagem formal, "Considerando...", "Resolve:". Retorne apenas o texto.`,
-  JURIDICO: `Você é um assistente jurídico especializado na Lei 5.810/94 (RJU Pará) e PCCR da Educação. Use o contexto fornecido para responder.`
+  IDP: `Você é um motor IDP (Intelligent Document Processing) para o governo.
+  Analise o texto OCR fornecido.
+  Identifique o tipo documental.
+  Extraia: Nome completo, Matrícula, Cargo, Datas relevantes, CIDs (se houver).
+  Saída OBRIGATÓRIA: JSON com chaves 'documentType', 'keyFields' (array de objetos field/value), e 'summary'.`,
+  
+  RAR: `Você é um Analista de RH Público (Lei 5.810/94).
+  Com base nos DADOS DO DOCUMENTO, DADOS DO SERVIDOR e REGRAS:
+  1. Verifique cada regra.
+  2. Emita um veredito final (Aprovado/Rejeitado).
+  3. Gere um 'chainOfThought' explicando seu raciocínio passo a passo.
+  Saída OBRIGATÓRIA: JSON com chaves 'veredicto' (status, parecer) e 'chainOfThought'.`
 };
 
-// --- 2. MOCK DE INTEGRAÇÃO (Siape/Ergon) ---
-// Em produção, isso seria um axios.get('https://api.governo.pa.gov.br/rh/...')
-const mockErgonIntegration = async (nome: string) => {
-    // Simula busca em banco legado
+// --- 2. FUNÇÕES AUXILIARES ---
+async function mockErgonIntegration(nome: string) {
+    // Em produção: axios.get(ERGON_API + nome)
+    logger.info(`Consultando Ergon para: ${nome}`);
     const dbMock = [
-        { nome: "MARIA", cargo: "Professor Classe I", matricula: "55221-9", tempo_servico: 12, lotacao: "Escola A" },
-        { nome: "JOAO", cargo: "Técnico Administrativo", matricula: "11234-1", tempo_servico: 2, lotacao: "Seduc Sede" }
+        { nome: "MARIA", cargo: "Professor Classe I", matricula: "55221-9", tempo_servico_em_anos: 12, lotacao: "Escola A" },
+        { nome: "JOAO", cargo: "Técnico Administrativo", matricula: "11234-1", tempo_servico_em_anos: 2, lotacao: "Seduc Sede" }
     ];
+    return dbMock.find(s => nome.toUpperCase().includes(s.nome)) || null;
+}
+
+// --- 3. TRIGGERS (O CORAÇÃO DO AGENTE AUTÔNOMO) ---
+
+// Gatilho 1: Assim que um documento é criado -> Inicia IDP
+export const onProcessCreated = onDocumentCreated(
+  "artifacts/{appId}/users/{userId}/intelligent_platform_docs/{docId}",
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
     
-    // Busca fuzzy simples
-    const servidor = dbMock.find(s => nome.toUpperCase().includes(s.nome));
-    return servidor || null;
-};
+    const data = snapshot.data();
+    if (data.status !== 'Uploaded') return; // Evita loops
 
-// --- CONTEXTO JURÍDICO (RAG Simplificado) ---
-// Para um RAG real, usaríamos Vector Store. Para este exemplo, injetamos trechos chaves.
-const LEI_5810_CONTEXT = `
-Art. 105. A licença para tratamento de saúde será concedida a pedido ou de ofício.
-Art. 110. A licença-maternidade será de 180 dias.
-Art. 125. O servidor terá direito a 30 dias de férias.
-`;
-
-// --- FUNÇÕES EXPORTADAS ---
-
-// A. Processamento Seguro (IDP + Raciocínio)
-export const analyzeProcess = onCall({ cors: true }, async (request) => {
-    if (!request.auth) throw new HttpsError('unauthenticated', 'Login necessário.');
+    logger.info(`[AGENTE] Iniciando IDP para doc: ${event.params.docId}`);
     
-    const { action, content, contextData } = request.data;
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-    let systemInstruction = "";
-    let userPrompt = content;
-
-    // Seleciona o prompt baseando-se na AÇÃO, não no input do usuário
-    switch(action) {
-        case 'EXTRACT_IDP':
-            systemInstruction = PROMPTS.IDP;
-            break;
-        case 'ANALYZE_RULES':
-            systemInstruction = PROMPTS.RAR;
-            // Injeta regras e dados de RH no prompt de usuário com segurança
-            userPrompt = `DADOS DOC: ${content}. DADOS RH: ${JSON.stringify(contextData.rh)}. REGRAS: ${JSON.stringify(contextData.rules)}`;
-            break;
-        case 'GENERATE_PORTARIA':
-            systemInstruction = PROMPTS.PORTARIA;
-            userPrompt = `Gere a portaria para: ${JSON.stringify(contextData)}`;
-            break;
-        default:
-            throw new HttpsError('invalid-argument', 'Ação desconhecida.');
-    }
-
     try {
-        const result = await model.generateContent({
-            contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-            // Se for IDP ou RAR, forçamos JSON. Se for Portaria, texto livre.
-            generationConfig: { responseMimeType: action === 'GENERATE_PORTARIA' ? "text/plain" : "application/json" }
-        });
-        
+        // Atualiza status para dar feedback na UI
+        await snapshot.ref.update({ status: 'Processing IDP' });
+
+        const model = genAI.getGenerativeModel({ model: MODEL_NAME, systemInstruction: PROMPTS.IDP });
+        const result = await model.generateContent(data.content);
         const responseText = result.response.text();
-        return { data: action === 'GENERATE_PORTARIA' ? { text: responseText } : JSON.parse(responseText) };
+        
+        // Limpeza básica de JSON markdown ```json ... ```
+        const jsonStr = responseText.replace(/```json|```/g, '').trim();
+        const idpResult = JSON.parse(jsonStr);
+
+        // Avança para o próximo estágio
+        await snapshot.ref.update({
+            status: 'Enriquecimento Pendente',
+            idpResult: JSON.stringify(idpResult)
+        });
 
     } catch (error) {
-        logger.error("Erro IA:", error);
-        throw new HttpsError('internal', 'Falha na IA');
+        logger.error("Erro no IDP:", error);
+        await snapshot.ref.update({ status: 'Failed', error: 'Erro na análise do documento.' });
     }
 });
 
-// B. Integração com Folha (Mock Cloud Function)
-export const enrichServidorData = onCall({ cors: true }, async (request) => {
-    if (!request.auth) throw new HttpsError('unauthenticated', 'Login necessário.');
+// Gatilho 2: Orquestrador de Mudanças de Estado
+export const onProcessUpdated = onDocumentUpdated(
+    "artifacts/{appId}/users/{userId}/intelligent_platform_docs/{docId}",
+    async (event) => {
+        const newData = event.data?.after.data();
+        const previousData = event.data?.before.data();
+        
+        if (!newData || newData.status === previousData?.status) return;
+
+        const docRef = event.data?.after.ref;
+        if (!docRef) return;
+
+        // ESTÁGIO: Enriquecimento (Busca dados no RH)
+        if (newData.status === 'Enriquecimento Pendente') {
+            logger.info(`[AGENTE] Iniciando Enriquecimento...`);
+            try {
+                const idpData = JSON.parse(newData.idpResult || '{}');
+                // Tenta achar o nome nos campos extraídos
+                const nomeField = idpData.keyFields?.find((f: any) => f.field.toLowerCase().includes('nome') || f.field.includes('Interessado'));
+                const nome = nomeField ? nomeField.value : "";
+
+                const servidorData = await mockErgonIntegration(nome);
+                
+                await docRef.update({
+                    status: 'Validacao Pendente', // Pausa para o humano confirmar
+                    enrichedData: JSON.stringify(servidorData || {})
+                });
+            } catch (e) {
+                logger.error("Erro Enriquecimento", e);
+                // Mesmo com erro, avança para validação humana para correção manual
+                await docRef.update({ status: 'Validacao Pendente', enrichedData: '{}' });
+            }
+        }
+
+        // ESTÁGIO: Raciocínio (Após humano validar e mudar status para 'Raciocinio Pendente')
+        if (newData.status === 'Raciocinio Pendente') {
+            logger.info(`[AGENTE] Iniciando Raciocínio Legal (RAR)...`);
+            try {
+                // Busca as regras do usuário
+                const userId = event.params.userId;
+                const appId = event.params.appId;
+                const rulesSnap = await db.collection(`artifacts/${appId}/users/${userId}/rules`).where('status', '==', 'Ativa').get();
+                
+                const activeRules = rulesSnap.docs.map(d => {
+                    const r = d.data();
+                    return `- ${r.nome}: SE ${JSON.stringify(r.condicoes)} ENTÃO ${JSON.stringify(r.acao_se_verdadeiro)}`;
+                }).join('\n');
+
+                const prompt = `
+                DADOS EXTRAÍDOS: ${newData.idpResult}
+                DADOS RH (ERGON): ${newData.enrichedData}
+                REGRAS VIGENTES:
+                ${activeRules}
+                `;
+
+                const model = genAI.getGenerativeModel({ model: MODEL_NAME, systemInstruction: PROMPTS.RAR });
+                const result = await model.generateContent({
+                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                    generationConfig: { responseMimeType: "application/json" }
+                });
+
+                const rarResult = JSON.parse(result.response.text());
+                
+                await docRef.update({
+                    status: rarResult.veredicto?.status === 'Aprovado' ? 'Aprovado' : 'Rejeitado',
+                    rarResult: JSON.stringify(rarResult)
+                });
+
+            } catch (e) {
+                logger.error("Erro RAR", e);
+                await docRef.update({ status: 'Failed', error: 'Erro no raciocínio jurídico.' });
+            }
+        }
+    }
+);
+
+// --- 4. CALLABLES (Para chamadas diretas da UI, ex: Chat e Portaria) ---
+
+export const generateDraft = onCall({ cors: true }, async (request) => {
+    const { context, veredicto } = request.data;
+    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
     
-    const { nome } = request.data;
-    if (!nome) return { found: false };
+    const prompt = `
+    Atue como Redator Oficial do Estado.
+    Contexto: ${JSON.stringify(context)}
+    Decisão: ${JSON.stringify(veredicto)}
+    Tarefa: Escreva a minuta da Portaria de concessão/indeferimento. Use linguagem formal, "O Secretário de Estado...", "Resolve...".
+    Retorne apenas o texto da portaria.
+    `;
 
-    const dados = await mockErgonIntegration(nome);
-    return { found: !!dados, data: dados || {} };
-});
-
-// C. Chat Jurídico com Contexto (RAG)
-export const chatJuridico = onCall({ cors: true }, async (request) => {
-    const { message } = request.data;
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", systemInstruction: PROMPTS.JURIDICO });
-
-    // Injeta o contexto da lei antes da pergunta do usuário (Simulação de RAG)
-    const fullPrompt = `CONTEXTO DA LEI 5.810: ${LEI_5810_CONTEXT}\n\nPERGUNTA DO USUÁRIO: ${message}`;
-
-    const result = await model.generateContent(fullPrompt);
+    const result = await model.generateContent(prompt);
     return { response: result.response.text() };
 });
+
+// (Mantenha o chatJuridico existente se desejar, ou melhore com RAG futuramente)

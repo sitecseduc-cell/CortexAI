@@ -1,15 +1,14 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
 import { safeParse, getStatusDisplay } from '@/utils/helpers';
-import { 
-  Trash2, Brain, FileSearch, UserCheck, ListChecks, 
-  Check, FileSignature, Loader2, Clock, ShieldAlert 
+import {
+  Trash2, Brain, FileSearch, UserCheck, ListChecks, Check, ChevronsRight, FileSignature, Loader2, Clock, ShieldAlert, FileText
 } from 'lucide-vue-next';
 import VuePdfEmbed from 'vue-pdf-embed';
 import { geminiApiService } from '@/services/geminiService';
 
 const props = defineProps(['doc']);
-const emit = defineEmits(['validate', 'delete']);
+const emit = defineEmits(['validate', 'delete', 'manual-advance']);
 
 // --- PARSING ---
 const idpData = computed(() => safeParse(props.doc?.idpResult));
@@ -42,11 +41,13 @@ const currentStepIndex = computed(() => {
 // --- VALIDAÇÃO HUMANA ---
 const editableData = ref(null);
 watch(() => props.doc, (newDoc) => {
-  if (newDoc?.status === 'Validacao Pendente' && idpData.value) {
-    // Se já tivermos feito edições locais e o doc não mudou, mantemos (evita reset ao digitar)
-    if (!editableData.value || editableData.value.docId !== newDoc.id) {
-       editableData.value = JSON.parse(JSON.stringify(idpData.value));
-       editableData.value.docId = newDoc.id; // Marca d'água interna
+  if (newDoc?.status === 'Validacao Pendente') {
+    // Só clona o objeto se o modo de edição não estiver ativo ou se o documento mudou.
+    // Isso evita a clonagem pesada a cada re-renderização enquanto o usuário digita.
+    if (idpData.value && (!editableData.value || editableData.value.docId !== newDoc.id)) {
+      const clonedData = { ...idpData.value, keyFields: idpData.value.keyFields.map(f => ({...f})) };
+      clonedData.docId = newDoc.id; // Marca d'água interna
+      editableData.value = clonedData;
     }
   } else {
     editableData.value = null;
@@ -231,6 +232,17 @@ const generateOfficialAct = async () => {
                         {{ rarData.chainOfThought }}
                     </div>
                 </details>
+            </div>
+
+            <!-- BOTÃO DE AVANÇO MANUAL (DISJUNTOR) -->
+            <div v-if="['Processing IDP', 'Enriquecimento Pendente', 'Raciocinio Pendente'].includes(doc.status)"
+                 class="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3 text-center">
+                <p class="text-xs text-yellow-400 mb-2">Se o processo parecer travado, você pode forçar o avanço para a etapa de validação manual.</p>
+                <button @click="emit('manual-advance', { docId: doc.id, currentStatus: doc.status })"
+                        class="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 rounded-lg text-sm transition-colors shadow-lg flex items-center justify-center">
+                    <ChevronsRight class="w-4 h-4 mr-2" />
+                    Avançar Manualmente
+                </button>
             </div>
 
             <!-- AÇÕES FINAIS -->

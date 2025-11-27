@@ -40,27 +40,6 @@ useSeeder(rulesPath);
 
 // --- AÇÕES ---
 
-const handleStartProcess = async (payload) => {
-    if(!docsPath.value) return;
-    try {
-        const colRef = collection(db, docsPath.value);
-        // Apenas criamos o doc. O Cloud Function (onProcessCreated) fará o resto!
-        const docRef = await setDoc(doc(colRef), {
-            name: payload.fileName,
-            content: payload.content,
-            processo: payload.processoId,
-            status: 'Uploaded', // Gatilho do Backend
-            timestamp: Date.now()
-        });
-        toastStore.addToast('Upload iniciado. O Agente está processando...', 'info');
-        isUploadModalOpen.value = false;
-        currentView.value = 'documents';
-    } catch (e) {
-        console.error(e);
-        toastStore.addToast('Erro ao criar processo.', 'error');
-    }
-};
-
 // Validação Humana (Único momento que o cliente interfere no fluxo além do upload)
 const onHumanValidation = async ({ docId, data }) => {
     if(!docsPath.value) return;
@@ -167,6 +146,6 @@ const handleDelete = async (id) => {
         </div>
     </div>
     
-    <UploadModal v-if="isUploadModalOpen" @close="isUploadModalOpen = false" @start="handleStartProcess" />
+    <UploadModal v-if="isUploadModalOpen" @close="isUploadModalOpen = false" />
   </div>
 </template>

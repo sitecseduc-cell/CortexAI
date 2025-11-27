@@ -3,8 +3,14 @@ import { ref, computed } from 'vue';
 import { X, Zap, UploadCloud, FileText, CheckCircle, Loader2 } from 'lucide-vue-next';
 // Importa a lista completa de processos que criamos
 import { PROCESSOS_CCM } from '@/constants/processes';
+// Imports do Firebase Storage e Firestore
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { collection, addDoc } from 'firebase/firestore'; // Use addDoc para criar ID automático
+import { storage, db, auth } from '@/libs/firebase';
+import { useAuth } from '@/composables/useAuth'; // Para pegar o ID do usuário
 
-const emit = defineEmits(['close', 'start']);
+const { user } = useAuth();
+const emit = defineEmits(['close']);
 const isUploading = ref(false);
 const selectedProcessId = ref('solicitacao_ferias'); // Define um padrão válido da nova lista
 const selectedFile = ref(null);
@@ -23,45 +29,54 @@ const handleDrop = (event) => {
     }
 };
 
-const handleStart = () => {
-    // Validação: exige arquivo ou confirmação para usar template
-    if (!selectedFile.value && !confirm("Nenhum arquivo selecionado. Usar documento de exemplo padrão?")) return;
+const handleStart = async () => {
+    if (!user.value) return alert("Erro: Usuário não autenticado");
 
     isUploading.value = true;
-    
-    // Busca o processo selecionado na lista importada
     const proc = PROCESSOS_CCM.find(p => p.id === selectedProcessId.value);
 
-    const reader = new FileReader();
-    
-    reader.onload = (e) => {
-        // Se for arquivo de texto real, usa o conteúdo. Se for PDF/Imagem ou vazio, usa o template.
-        const content = selectedFile.value?.type === 'text/plain' 
-            ? e.target.result 
-            : proc.template; 
+    try {
+        let fileUrl = null;
+        let storagePath = null;
 
-        const payload = {
-            processoId: proc.id,
-            processoNome: proc.nome,
-            fileName: selectedFile.value?.name || `${proc.nome}_Scan.pdf`,
-            content: content
-        };
+        // 1. Upload para o Firebase Storage
+        if (selectedFile.value) {
+            const fileName = `${Date.now()}_${selectedFile.value.name}`;
+            // Caminho: uploads/{userId}/{fileName}
+            storagePath = `uploads/${user.value.uid}/${fileName}`;
+            const fileRef = storageRef(storage, storagePath);
+            
+            // Realiza o upload
+            const snapshot = await uploadBytes(fileRef, selectedFile.value);
+            // Obtém a URL pública para o backend baixar
+            fileUrl = await getDownloadURL(snapshot.ref);
+        } else {
+            // Lógica de template (fallback) se desejar manter
+            fileUrl = null; 
+        }
 
-        emit('start', payload);
+        // 2. Salva Metadados no Firestore (Leve)
+        // Caminho dinâmico conforme suas regras: artifacts/{appId}/users/{userId}/intelligent_platform_docs
+        const appId = 'default-autonomous-agent'; 
+        const docsPath = `artifacts/${appId}/users/${user.value.uid}/intelligent_platform_docs`;
         
-        // Reset visual após o envio
-        setTimeout(() => {
-            isUploading.value = false;
-            selectedFile.value = null;
-        }, 500);
-    };
+        await addDoc(collection(db, docsPath), {
+            name: selectedFile.value?.name || proc.nome,
+            fileUrl: fileUrl,       // URL do arquivo no Storage
+            storagePath: storagePath,
+            processo: proc.id,
+            processoNome: proc.nome,
+            status: fileUrl ? 'Uploaded' : 'Enriquecimento Pendente',     // Gatilho para a Cloud Function
+            timestamp: Date.now(),
+        });
 
-    // Se houver arquivo de texto, lê o conteúdo real
-    if (selectedFile.value && selectedFile.value.type === 'text/plain') {
-        reader.readAsText(selectedFile.value);
-    } else {
-        // Simula um delay de leitura para arquivos binários (PDFs) ou uso do template
-        setTimeout(() => reader.onload(), 1500);
+        emit('close');
+
+    } catch (error) {
+        console.error("Erro no upload:", error);
+        alert("Falha ao enviar documento.");
+    } finally {
+        isUploading.value = false;
     }
 };
 

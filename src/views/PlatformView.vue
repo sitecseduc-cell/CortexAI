@@ -52,6 +52,19 @@ const onHumanValidation = async ({ docId, data }) => {
     toastStore.addToast('Validado! Agente retomando análise...', 'success');
 };
 
+const handleManualAdvance = async ({ docId }) => {
+    if(!docsPath.value) return;
+    
+    const docRef = doc(db, docsPath.value, docId);
+    
+    // Força o status para 'Validacao Pendente' para liberar a edição manual
+    await updateDoc(docRef, { 
+        status: 'Validacao Pendente'
+    });
+    
+    toastStore.addToast('Avançado para validação manual.', 'warning');
+};
+
 const handleDelete = async (id) => {
     if(confirm("Tem certeza que deseja excluir este processo?")) {
         await deleteDoc(doc(db, docsPath.value, id));
@@ -139,6 +152,7 @@ const handleDelete = async (id) => {
                             :doc="documents.find(d => d.id === selectedDocId)" 
                             @validate="onHumanValidation"
                             @delete="handleDelete"
+                            @manual-advance="handleManualAdvance"
                         />
                     </div>
                 </main>

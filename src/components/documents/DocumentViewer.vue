@@ -38,17 +38,41 @@ const currentStepIndex = computed(() => {
   return 0;
 });
 
-// --- VALIDAÇÃO HUMANA ---
+// --- VALIDAÇÃO HUMANA & INSERÇÃO MANUAL ---
 const editableData = ref(null);
+
+// Campos padrão para quando não há documento ou leitura da IA
+const DEFAULT_FIELDS = [
+    { field: 'Nome', value: '' },
+    { field: 'Matrícula', value: '' },
+    { field: 'Cargo', value: '' },
+    { field: 'Data Início', value: '' },
+    { field: 'Data Fim', value: '' }
+];
+
 watch(() => props.doc, (newDoc) => {
   if (newDoc?.status === 'Validacao Pendente') {
-    // Só clona o objeto se o modo de edição não estiver ativo ou se o documento mudou.
-    // Isso evita a clonagem pesada a cada re-renderização enquanto o usuário digita.
-    if (idpData.value && (!editableData.value || editableData.value.docId !== newDoc.id)) {
-      const clonedData = { ...idpData.value, keyFields: idpData.value.keyFields.map(f => ({...f})) };
-      clonedData.docId = newDoc.id; // Marca d'água interna
-      editableData.value = clonedData;
-    }
+    // Se já estamos editando este doc, não reseta
+    if (editableData.value?.docId === newDoc.id) return;
+
+    // Lógica Melhorada:
+    // 1. Tenta pegar os dados da IA (idpData)
+    // 2. Se não existir, cria uma estrutura vazia para preenchimento manual
+    const baseData = idpData.value || { 
+        documentType: 'Inserção Manual', 
+        keyFields: DEFAULT_FIELDS.map(f => ({ ...f })) // Clona para evitar reatividade cruzada
+    };
+
+    // Clona para edição
+    const clonedData = { 
+        ...baseData,
+        // Garante que keyFields exista mesmo se o objeto base estiver incompleto
+        keyFields: baseData.keyFields ? baseData.keyFields.map(f => ({...f})) : DEFAULT_FIELDS.map(f => ({ ...f }))
+    };
+    
+    clonedData.docId = newDoc.id; // Marca d'água interna
+    editableData.value = clonedData;
+    
   } else {
     editableData.value = null;
   }
@@ -176,16 +200,23 @@ const handleManualAdvance = () => {
                 <!-- Modo Validação (HUMAN IN THE LOOP) -->
                 <div v-if="editableData" class="p-4 bg-orange-900/10 border-b border-orange-500/30">
                     <div class="flex items-center mb-4 text-orange-400 text-sm font-bold">
-                        <ListChecks class="w-5 h-5 mr-2" /> Validação Necessária
+                        <ListChecks class="w-5 h-5 mr-2" /> 
+                        {{ idpData ? 'Confirmação de Leitura' : 'Informe os Dados do Processo' }}
                     </div>
                     <div class="space-y-2">
                         <div v-for="(field, i) in editableData.keyFields" :key="i" class="flex items-center gap-2">
-                            <span class="w-1/3 text-xs text-slate-400 text-right truncate">{{ field.field }}:</span>
-                            <input v-model="field.value" class="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm text-white focus:border-orange-500 outline-none transition-colors" />
+                            <input v-if="!idpData" v-model="field.field" class="w-1/3 text-xs text-slate-400 text-right bg-transparent border-b border-transparent hover:border-slate-700 focus:border-indigo-500 outline-none transition-colors" placeholder="Nome do Campo" />
+                            <span v-else class="w-1/3 text-xs text-slate-400 text-right truncate">{{ field.field }}:</span>
+                            
+                            <input v-model="field.value" class="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm text-white focus:border-orange-500 outline-none transition-colors" placeholder="Valor..." />
                         </div>
+                        
+                        <button v-if="!idpData" @click="editableData.keyFields.push({ field: 'Novo Campo', value: '' })" class="text-xs text-indigo-400 hover:text-indigo-300 flex items-center ml-auto mt-2">
+                            + Adicionar Campo
+                        </button>
                     </div>
                     <button @click="handleHILSubmit" class="mt-4 w-full bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 rounded-lg text-sm transition-colors shadow-lg">
-                        Confirmar e Enviar para Agente
+                        {{ idpData ? 'Confirmar e Enviar para Agente' : 'Salvar Dados e Analisar' }}
                     </button>
                 </div>
 

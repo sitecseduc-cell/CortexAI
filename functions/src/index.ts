@@ -134,37 +134,41 @@ function levenshtein(a: string, b: string): number {
  * @param {string} termoBusca - The name or registration to search for.
  * @return {Promise<any>} - The found user data or null.
  */
-async function mockErgonIntegration(termoBusca: string) {
-  // Em produção: axios.get(ERGON_API + nome)
-  logger.info(`Consultando Ergon (Mock) para: ${termoBusca}`);
+async function mockErgonIntegration(termoBusca: string): Promise<any> {
+  logger.info(`[ERGON] Buscando dados para: ${termoBusca}`);
   if (!termoBusca) return null;
 
-  const termoNormalizado = termoBusca.toUpperCase().trim();
-
+  const termoUpper = termoBusca.toUpperCase().trim();
+  
+  // Banco de dados Mockado
   const dbMock = [
-    { nome: "MARIA OLIVEIRA", cargo: "Professor Classe I", matricula: "55221-9", tempo_servico_em_anos: 12, lotacao: "Escola A" },
-    { nome: "JOAO SILVA", cargo: "Técnico Administrativo", matricula: "11234-1", tempo_servico_em_anos: 2, lotacao: "Seduc Sede" },
-    { nome: "CARLOS SOUZA", cargo: "Motorista", matricula: "99887-2", tempo_servico_em_anos: 25, lotacao: "Transporte" }
+    { nome: "MARIA OLIVEIRA", cargo: "Professor Classe I", matricula: "55221-9", tempo_servico_em_anos: 12, lotacao: "Escola A", status_funcional: "Ativo" },
+    { nome: "JOAO SILVA", cargo: "Técnico Administrativo", matricula: "11234-1", tempo_servico_em_anos: 2, lotacao: "Seduc Sede", status_funcional: "Estágio Probatório" },
+    { nome: "CARLOS SOUZA", cargo: "Motorista", matricula: "99887-2", tempo_servico_em_anos: 25, lotacao: "Transporte", status_funcional: "Ativo" }
   ];
 
-  // 1. Tenta busca exata por Matrícula (se o termo parecer uma matrícula)
-  const matchMatricula = dbMock.find((s) => s.matricula.replace(/\D/g, "") === termoNormalizado.replace(/\D/g, ""));
-  if (matchMatricula) return matchMatricula;
-
-  // 2. Tenta busca Fuzzy por Nome
-  const LIMITE_ERRO = 3;
-  const melhorMatch = dbMock.reduce((melhor, atual) => {
-      const distancia = levenshtein(atual.nome, termoNormalizado);
-      if (distancia <= LIMITE_ERRO && distancia < melhor.distancia) {
-          return { servidor: atual, distancia };
-      }
-      return melhor;
-  }, { servidor: null as any, distancia: 999 }); // eslint-disable-line @typescript-eslint/no-explicit-any
-
-  return melhorMatch.servidor;
+  // Busca simples (pode ser melhorada com fuzzy match se necessário)
+  return dbMock.find(s => termoUpper.includes(s.nome)) || 
+         dbMock.find(s => s.matricula === termoUpper) ||
+         { erro: "Servidor não encontrado na base RH", tempo_servico_em_anos: 0 };
 }
 
 // --- 3. TRIGGERS (O CORAÇÃO DO AGENTE AUTÔNOMO) ---
+
+// Função auxiliar extraída para reuso
+async function realizarEnriquecimento(newData: any, docRef: any) {
+    const idpData = JSON.parse(newData.idpResult || "{}");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nomeField = idpData.keyFields?.find((f: any) => f.field.toLowerCase().includes("nome") || f.field.toLowerCase().includes("interessado"));
+    const nome = nomeField ? nomeField.value : "";
+    
+    const dados = await mockErgonIntegration(nome);
+    
+    await docRef.update({
+        status: "Validacao Pendente",
+        enrichedData: JSON.stringify(dados || {})
+    });
+}
 
 // Gatilho 1: Assim que um documento é criado -> Inicia IDP
 export const onProcessCreated = onDocumentCreated(
@@ -183,7 +187,7 @@ export const onProcessCreated = onDocumentCreated(
       await snapshot.ref.update({status: "Processing IDP"});
       
       // 1. Baixar o arquivo do Storage
-      logger.info(`[AGENTE] Baixando arquivo: ${data.fileUrl}`);
+      logger.info(`[AGENTE] Baixando arquivo para IDP: ${data.fileUrl}`);
       const response = await fetch(data.fileUrl);
       if (!response.ok) {
         throw new Error(`Falha ao baixar o arquivo: ${response.statusText}`);
@@ -203,10 +207,17 @@ export const onProcessCreated = onDocumentCreated(
           { text: PROMPTS.IDP }
       ]);
       const responseText = result.response.text();
-
+      
       // Limpeza básica de JSON markdown ```json ... ```
       const jsonStr = responseText.replace(/```json|```/g, "").trim();
       const idpResult = JSON.parse(jsonStr);
+
+      // Salva o resultado no documento
+      await snapshot.ref.update({
+          idpResult: JSON.stringify(idpResult),
+          status: "Enriquecimento Pendente"
+      });
+
     } catch (error) {
       logger.error("Erro no IDP:", error);
       await snapshot.ref.update({
@@ -231,29 +242,16 @@ export const onProcessUpdated = onDocumentUpdated(
 
     // ESTÁGIO: Enriquecimento (Busca dados no RH)
     if (newData.status === "Enriquecimento Pendente") {
-      logger.info(`[AGENTE] Iniciando Enriquecimento...`);
       try {
-        const idpData = JSON.parse(newData.idpResult || "{}");
-        // Tenta achar o nome nos campos extraídos
-        const nomeField = idpData.keyFields?.find(
-          (f: any) => f.field.toLowerCase().includes("nome") || // eslint-disable-line @typescript-eslint/no-explicit-any
-                      f.field.includes("Interessado")
-        );
-        const nome = nomeField ? nomeField.value : "";
-
-        const servidorData = await mockErgonIntegration(nome);
-
-        await docRef.update({
-          status: "Validacao Pendente", // Pausa para o humano confirmar
-          enrichedData: JSON.stringify(servidorData || {}),
-        });
+        logger.info(`[AGENTE] Iniciando Enriquecimento...`);
+        await realizarEnriquecimento(newData, docRef);
       } catch (e) {
         logger.error("Erro Enriquecimento", e);
         // Mesmo com erro, avança para validação humana para correção manual
         await docRef.update({
           status: "Validacao Pendente",
           enrichedData: "{}",
-        });
+        }); // Fallback: Avança mesmo sem dados para não travar o fluxo
       }
     }
 
@@ -261,6 +259,23 @@ export const onProcessUpdated = onDocumentUpdated(
     if (newData.status === "Raciocinio Pendente") {
       logger.info(`[AGENTE] Iniciando Raciocínio Legal (RAR)...`);
       try {
+        // A. GARANTIA DE DADOS (Self-Healing)
+        // Se entrou manualmente, pode não ter dados de RH (enrichedData). Vamos buscar agora.
+        let dadosRH = newData.enrichedData;
+        
+        if (!dadosRH || Object.keys(JSON.parse(dadosRH || "{}")).length === 0 || JSON.parse(dadosRH).erro) {
+            logger.warn("[AGENTE] Dados de RH ausentes ou com erro. Tentando buscar antes da análise...");
+            const idpData = JSON.parse(newData.idpResult || "{}");
+            // Tenta achar o nome em qualquer campo se não tiver estruturado
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const nomeAlvo = idpData.keyFields?.find((f:any) => f.value && f.value.length > 3)?.value || "Desconhecido";
+            const resultadoBusca = await mockErgonIntegration(nomeAlvo);
+            dadosRH = JSON.stringify(resultadoBusca);
+            
+            // Salva para persistência
+            await docRef.update({ enrichedData: dadosRH });
+        }
+
         // Busca as regras do usuário
         const userId = event.params.userId;
         const appId = event.params.appId;
@@ -268,30 +283,31 @@ export const onProcessUpdated = onDocumentUpdated(
           .collection(`artifacts/${appId}/users/${userId}/rules`)
           .where("status", "==", "Ativa")
           .get();
-
         const activeRules = rulesSnap.docs
           .map((d) => {
             const r = d.data();
-            return `- ${r.nome}: SE ${JSON.stringify(r.condicoes)} ENTÃO ${JSON.stringify(r.acao_se_verdadeiro)}`;
+            return `- ${r.nome}: ${JSON.stringify(r.condicoes)}`;
           })
           .join("\n");
 
         const prompt = `
-                DADOS EXTRAÍDOS: ${newData.idpResult}
-                DADOS RH (ERGON): ${newData.enrichedData}
-                REGRAS VIGENTES:
-                ${activeRules}
-                `;
+          CONTEXTO DO PROCESSO:
+          - Documento (Extração): ${newData.idpResult}
+          - Dados Funcionais (RH): ${dadosRH}
+          - Regras de Negócio Ativas:
+          ${activeRules || "Usar regras gerais da Lei 5.810/94"}
 
+          TAREFA:
+          Avalie se o servidor tem direito ao solicitado.
+          Considere o tempo de serviço e status funcional.
+        `;
+        
         const model = genAI.getGenerativeModel({
           model: MODEL_NAME,
           systemInstruction: PROMPTS.RAR,
-        });
-        const result = await model.generateContent({
-          contents: [{role: "user", parts: [{text: prompt}]}],
           generationConfig: {responseMimeType: "application/json"},
         });
-
+        const result = await model.generateContent(prompt);
         const rarResult = JSON.parse(result.response.text());
 
         await docRef.update({
@@ -301,10 +317,10 @@ export const onProcessUpdated = onDocumentUpdated(
       } catch (e) {
         logger.error("Erro RAR", e);
         await docRef.update({
-          status: "Failed",
-          error: "Erro no raciocínio jurídico.",
+          status: "Failed", 
+          error: "Falha na análise inteligente. Verifique os logs." 
         });
-      }
+      } // Ou criar status "Pendência"
     }
   }
 );
@@ -323,7 +339,7 @@ export const generateDraft = onCall({cors: true}, async (request) => {
     Retorne apenas o texto da portaria.
     `;
 
-  const result = await model.generateContent(prompt);
+  const result = await model.generateContent(prompt); // Use o prompt diretamente
   return {response: result.response.text()};
 });
 
@@ -351,7 +367,7 @@ export const callGeminiAgent = onCall({cors: true}, async (request) => {
   try {
     const result = await model.generateContent(content);
     const responseText = result.response.text();
-
+    
     // Retorna no formato { data: ... } para casar com o geminiService.js
     // O frontend espera result.data.data
     return {

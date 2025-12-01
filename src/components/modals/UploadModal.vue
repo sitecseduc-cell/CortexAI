@@ -88,10 +88,15 @@ const currentProcessDescription = computed(() => {
 
 <template>
   <div class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
-    <div class="bg-slate-900 p-8 rounded-2xl border border-slate-700 w-full max-w-lg relative text-white shadow-2xl">
+    <div 
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="upload-modal-title"
+      class="bg-slate-900 p-8 rounded-2xl border border-slate-700 w-full max-w-lg relative text-white shadow-2xl"
+    >
       <button @click="emit('close')" class="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors"><X /></button>
       
-      <h2 class="text-2xl font-bold mb-1 text-white flex items-center">
+      <h2 id="upload-modal-title" class="text-2xl font-bold mb-1 text-white flex items-center">
           <Zap class="w-6 h-6 mr-2 text-indigo-400" /> Novo Processo
       </h2>
       <p class="text-slate-400 text-sm mb-6">Selecione o tipo de requerimento e anexe o documento.</p>

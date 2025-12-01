@@ -76,7 +76,7 @@ const generateOfficialAct = async () => {
             assunto: idpData.value?.documentType
         };
         // Chama a Cloud Function
-        const text = await geminiApiService.generateDraft(processContext, rarData.value?.veredicto);
+        const text = await geminiApiService.generateDraft(processContext, rarData.value?.veredicto.parecer);
         portariaText.value = typeof text === 'string' ? text : text.response;
     } catch (e) {
         console.error(e);
@@ -84,6 +84,14 @@ const generateOfficialAct = async () => {
     } finally {
         isGeneratingPortaria.value = false;
     }
+};
+
+// --- AVANÇO MANUAL ---
+const handleManualAdvance = () => {
+    // O ideal é que o componente pai ou um store gerencie o estado.
+    // Este emit notifica o pai para que ele altere o status do documento.
+    // Ex: O pai ouviria com @manual-advance="updateDocStatus"
+    emit('manual-advance', { docId: props.doc.id, currentStatus: props.doc.status });
 };
 </script>
 
@@ -235,10 +243,10 @@ const generateOfficialAct = async () => {
             </div>
 
             <!-- BOTÃO DE AVANÇO MANUAL (DISJUNTOR) -->
-            <div v-if="['Processing IDP', 'Enriquecimento Pendente', 'Raciocinio Pendente'].includes(doc.status)"
+            <div v-if="['Processing IDP', 'Enriquecimento Pendente'].includes(doc.status)"
                  class="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3 text-center">
                 <p class="text-xs text-yellow-400 mb-2">Se o processo parecer travado, você pode forçar o avanço para a etapa de validação manual.</p>
-                <button @click="emit('manual-advance', { docId: doc.id, currentStatus: doc.status })"
+                <button @click="handleManualAdvance"
                         class="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 rounded-lg text-sm transition-colors shadow-lg flex items-center justify-center">
                     <ChevronsRight class="w-4 h-4 mr-2" />
                     Avançar Manualmente

@@ -112,5 +112,20 @@ export const geminiApiService = {
       };
 
       return await this.callGeminiAPI(dossierPrompt, RAR_SYSTEM_INSTRUCTION, rarSchema);
+  },
+
+  async generateDraft(context, veredict) {
+    const generateDraftFunction = httpsCallable(functions, 'generateOfficialAct');
+    try {
+      const result = await generateDraftFunction({
+        context,
+        veredict
+      });
+      // A função pode retornar um objeto { response: "texto" }
+      return result.data.response || result.data;
+    } catch (error) {
+      console.error("Erro ao gerar minuta de portaria:", error);
+      throw new Error("Falha ao se comunicar com o serviço de geração de documentos.");
+    }
   }
 };

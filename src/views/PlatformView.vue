@@ -15,7 +15,6 @@ import Dashboard from '@/components/dashboard/Dashboard.vue';
 import DocumentViewer from '@/components/documents/DocumentViewer.vue';
 import RuleManager from '@/components/rules/RuleManager.vue';
 import UploadModal from '@/components/modals/UploadModal.vue';
-import ToolsView from './ToolsView.vue';
 import SettingsView from './SettingsView.vue';
 
 // --- ESTADO ---
@@ -80,29 +79,43 @@ const handleDelete = async (id) => {
 
     <div class="flex-grow flex overflow-hidden">
         <!-- Navegação Lateral Estilo "App" -->
-        <aside class="w-20 bg-slate-900 border-r border-slate-800 flex flex-col items-center py-6 space-y-6 shrink-0 z-30">
-            <button @click="currentView = 'dashboard'" class="p-3 rounded-xl transition-all group relative" :class="currentView === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'">
-                <LayoutDashboard class="w-6 h-6" />
-                <span class="absolute left-14 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap border border-slate-700 pointer-events-none">Dashboard</span>
+        <aside class="w-24 bg-slate-900 border-r border-slate-800 flex flex-col items-center py-6 space-y-4 shrink-0 z-30">
+            
+            <button @click="currentView = 'dashboard'" 
+                class="flex flex-col items-center justify-center w-full py-3 px-1 transition-all group border-l-2" 
+                :class="currentView === 'dashboard' ? 'border-indigo-500 bg-slate-800/50 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'">
+                <LayoutDashboard class="w-6 h-6 mb-1.5" />
+                <span class="text-[10px] font-medium tracking-wide">Dashboard</span>
             </button>
-            <button @click="currentView = 'documents'" class="p-3 rounded-xl transition-all group relative" :class="currentView === 'documents' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'">
-                <FileText class="w-6 h-6" />
-                <span class="absolute left-14 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap border border-slate-700 pointer-events-none">Processos</span>
+
+            <button @click="currentView = 'documents'" 
+                class="flex flex-col items-center justify-center w-full py-3 px-1 transition-all group border-l-2" 
+                :class="currentView === 'documents' ? 'border-indigo-500 bg-slate-800/50 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'">
+                <FileText class="w-6 h-6 mb-1.5" />
+                <span class="text-[10px] font-medium tracking-wide">Processos</span>
             </button>
-            <button @click="currentView = 'rules'" class="p-3 rounded-xl transition-all group relative" :class="currentView === 'rules' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'">
-                <Shield class="w-6 h-6" />
-                <span class="absolute left-14 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap border border-slate-700 pointer-events-none">Regras</span>
+
+            <button @click="currentView = 'rules'" 
+                class="flex flex-col items-center justify-center w-full py-3 px-1 transition-all group border-l-2" 
+                :class="currentView === 'rules' ? 'border-indigo-500 bg-slate-800/50 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'">
+                <Shield class="w-6 h-6 mb-1.5" />
+                <span class="text-[10px] font-medium tracking-wide">Regras</span>
             </button>
             
             <div class="flex-grow"></div>
             
-            <!-- Ferramentas e Config no rodapé da sidebar -->
-            <button @click="currentView = 'tools'" class="p-3 rounded-xl transition-all group relative" :class="currentView === 'tools' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800'">
-                 <!-- Ícone genérico para ferramentas -->
-                 <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            <button @click="currentView = 'tools'" 
+                class="flex flex-col items-center justify-center w-full py-3 px-1 transition-all group border-l-2"
+                :class="currentView === 'tools' ? 'border-indigo-500 bg-slate-800/50 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 mb-1.5"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                 <span class="text-[10px] font-medium tracking-wide">Ferramentas</span>
             </button>
-            <button @click="currentView = 'settings'" class="p-3 rounded-xl transition-all group relative" :class="currentView === 'settings' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800'">
-                 <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+
+            <button @click="currentView = 'settings'" 
+                class="flex flex-col items-center justify-center w-full py-3 px-1 transition-all group border-l-2"
+                :class="currentView === 'settings' ? 'border-indigo-500 bg-slate-800/50 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 mb-1.5"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                 <span class="text-[10px] font-medium tracking-wide">Ajustes</span>
             </button>
         </aside>
 
@@ -110,12 +123,6 @@ const handleDelete = async (id) => {
         <div class="flex-grow flex overflow-hidden bg-slate-950 relative">
             
             <!-- Views de Tela Cheia -->
-            <div v-if="currentView === 'tools'" class="absolute inset-0 p-6 z-20 bg-slate-950">
-                <div class="h-full bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl overflow-hidden">
-                    <ToolsView />
-                </div>
-            </div>
-
             <div v-if="currentView === 'settings'" class="absolute inset-0 p-6 z-20 bg-slate-950">
                 <div class="h-full bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl overflow-hidden">
                     <SettingsView />

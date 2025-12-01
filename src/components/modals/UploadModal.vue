@@ -66,6 +66,7 @@ const handleStart = async () => {
             storagePath: storagePath,
             processo: proc.id,
             processoNome: proc.nome,
+            uid: user.value.uid, // IMPORTANTE: Salvar o UID no documento para uso na UI
             status: fileUrl ? 'Uploaded' : 'Enriquecimento Pendente',     // Gatilho para a Cloud Function
             timestamp: Date.now(),
         });

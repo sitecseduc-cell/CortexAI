@@ -12,7 +12,9 @@ const filterStatus = ref('All');
 const filteredDocuments = computed(() => {
   if (!props.documents) return [];
   return props.documents.filter(doc => {
-    const matchesSearch = doc.name.toLowerCase().includes(searchTerm.value.toLowerCase());
+    // CORREÇÃO: Garante que doc.name existe antes de chamar toLowerCase
+    const name = doc.name || '';
+    const matchesSearch = name.toLowerCase().includes(searchTerm.value.toLowerCase());
     const matchesFilter = filterStatus.value === 'All' || doc.status === filterStatus.value;
     return matchesSearch && matchesFilter;
   });
@@ -115,4 +117,3 @@ const filters = [
     </div>
   </aside>
 </template>
-

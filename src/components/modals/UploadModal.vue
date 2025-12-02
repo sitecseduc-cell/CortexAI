@@ -12,6 +12,8 @@ import { useAuth } from '@/composables/useAuth'; // Para pegar o ID do usuário
 const { user } = useAuth();
 const emit = defineEmits(['close']);
 const isUploading = ref(false);
+// Adicione um ref para a categoria
+const userCategory = ref('ADMINISTRATIVO'); // Valor padrão seguro
 const selectedProcessId = ref('solicitacao_ferias'); // Define um padrão válido da nova lista
 const selectedFile = ref(null);
 const isDragOver = ref(false);
@@ -66,6 +68,11 @@ const handleStart = async () => {
             storagePath: storagePath,
             processo: proc.id,
             processoNome: proc.nome,
+            
+            // --- NOVO CAMPO ---
+            userCategory: userCategory.value, 
+            // ------------------
+
             uid: user.value.uid, // IMPORTANTE: Salvar o UID no documento para uso na UI
             status: fileUrl ? 'Uploaded' : 'Enriquecimento Pendente',     // Gatilho para a Cloud Function
             timestamp: Date.now(),
@@ -114,6 +121,27 @@ const currentProcessDescription = computed(() => {
           </div>
           <p class="text-xs text-indigo-400 mt-2 ml-1 h-4">
               {{ currentProcessDescription }}
+          </p>
+      </div>
+
+      <div class="mb-5">
+          <label class="block text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">Categoria Funcional</label>
+          <div class="flex gap-4">
+              <label class="flex-1 cursor-pointer">
+                  <input type="radio" v-model="userCategory" value="ADMINISTRATIVO" class="peer sr-only" />
+                  <div class="p-3 rounded-xl border border-slate-700 bg-slate-800 text-slate-400 peer-checked:bg-indigo-600 peer-checked:text-white peer-checked:border-indigo-500 transition-all text-center text-sm font-medium">
+                      Administrativo
+                  </div>
+              </label>
+              <label class="flex-1 cursor-pointer">
+                  <input type="radio" v-model="userCategory" value="MAGISTERIO" class="peer sr-only" />
+                  <div class="p-3 rounded-xl border border-slate-700 bg-slate-800 text-slate-400 peer-checked:bg-purple-600 peer-checked:text-white peer-checked:border-purple-500 transition-all text-center text-sm font-medium">
+                      Professor (Magistério)
+                  </div>
+              </label>
+          </div>
+          <p class="text-xs text-slate-500 mt-2">
+              Isso define o limite legal de férias (30 ou 45 dias).
           </p>
       </div>
 

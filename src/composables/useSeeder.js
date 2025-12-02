@@ -18,14 +18,16 @@ export function useSeeder(collectionPath) {
     },
     
     // --- LICENÇAS E AFASTAMENTOS ---
+    // --- FÉRIAS (Regra Refatorada) ---
     { 
-      id: "REGRA_FERIAS_01", 
-      nome: "Limite Constitucional (Férias)", 
+      id: "REGRA_FERIAS_GERAL", 
+      nome: "Limite Padrão de Férias (Admin)", 
       processo: "solicitacao_ferias", 
       status: "Ativa", 
-      condicoes: [{ fato: "dias_solicitados", operador: ">", valor: 30 }], 
-      acao_se_verdadeiro: { status: "FALHA", mensagem: "Solicitação excede o limite de 30 dias anuais." },
-      descricao: "O gozo de férias não pode exceder 30 dias por período."
+      // Esta regra visual apenas alerta. O backend fará a validação final baseada no cargo.
+      condicoes: [{ fato: "dias_solicitados", operador: ">", valor: 45 }], 
+      acao_se_verdadeiro: { status: "FALHA", mensagem: "Solicitação excede o teto máximo absoluto (45 dias)." },
+      descricao: "Limite máximo do sistema. Admin: 30 dias / Prof: 45 dias (validado pelo Agente).",
     },
     { 
       id: "REGRA_MAT_01", 

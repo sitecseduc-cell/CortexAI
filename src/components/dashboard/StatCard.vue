@@ -6,18 +6,17 @@ const props = defineProps({
     title: { type: String, default: 'Título' },
     value: { type: [Number, String], default: 0 },
     unit: { type: String, default: '' },
-    icon: { type: Object, default: () => FileText },
+    icon: { type: [Object, Function], default: () => FileText },
     colorClass: { type: String, default: 'text-slate-400' }, // Valor padrão seguro
     rate: Number,
     rateLabel: String
 });
 
 // Gera classes dinâmicas para o "brilho" baseado na cor do ícone (simplificado)
-// CORREÇÃO: Uso de ?. para evitar erro se colorClass for nulo em algum momento
 const glowClass = computed(() => {
-    if (props.colorClass?.includes('green')) return 'from-green-500/10 to-transparent border-green-500/20';
-    if (props.colorClass?.includes('red')) return 'from-red-500/10 to-transparent border-red-500/20';
-    if (props.colorClass?.includes('indigo')) return 'from-indigo-500/10 to-transparent border-indigo-500/20';
+    if (props.colorClass.includes('green')) return 'from-green-500/10 to-transparent border-green-500/20';
+    if (props.colorClass.includes('red')) return 'from-red-500/10 to-transparent border-red-500/20';
+    if (props.colorClass.includes('indigo')) return 'from-indigo-500/10 to-transparent border-indigo-500/20';
     return 'from-slate-700/10 to-transparent border-slate-700/20';
 });
 

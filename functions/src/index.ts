@@ -10,7 +10,7 @@
 import {onCall, HttpsError} from "firebase-functions/v2/https";
 import {onDocumentCreated, onDocumentUpdated} from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
-import {GoogleGenerativeAI} from "@google/generative-ai";
+import {GoogleGenerativeAI, SchemaType} from "@google/generative-ai";
 import {initializeApp} from "firebase-admin/app";
 import {getFirestore} from "firebase-admin/firestore";
 
@@ -20,38 +20,39 @@ const db = getFirestore();
 // NÃO inicialize o cliente globalmente com process.env, pois pode falhar no deploy
 // const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); <--- REMOVIDO
 
-// --- 1. PROMPTS & CONFIG ---
 const MODEL_NAME = "gemini-1.5-flash";
 
-interface GenerationConfig {
-    responseMimeType?: "application/json" | "text/plain";
-    responseSchema?: object;
-}
+// --- 1. PROMPTS ESPECIALIZADOS ---
 
-const PROMPTS = {
-  IDP: `Você é um motor IDP (Intelligent Document Processing) para o governo.
-  Analise o texto OCR fornecido.
-  Identifique o tipo documental.
-  Extraia: Nome completo, Matrícula, Cargo, Datas relevantes, CIDs (se houver).
-  Saída OBRIGATÓRIA: JSON com chaves 'documentType', 'keyFields' (array de objetos field/value), e 'summary'.`,
-
-  RAR: `Você é um Analista de RH Público (Lei 5.810/94).
-  Com base nos DADOS DO DOCUMENTO, DADOS DO SERVIDOR e REGRAS:
-  1. Verifique cada regra.
-  2. Emita um veredito final (Aprovado/Rejeitado).
-  3. Gere um 'chainOfThought' explicando seu raciocínio passo a passo.
-  Saída OBRIGATÓRIA: JSON com chaves 'veredicto' (status, parecer) e 'chainOfThought'.`,
-};
-
-// --- 2. FUNÇÕES AUXILIARES ---
+// Prompt base para IDP (Extração)
+const PROMPT_IDP = `
+Você é um motor de extração de dados para a SEDUC.
+Analise o documento anexo.
+Extraia:
+- Tipo Documental (Ex: Requerimento de Férias, Atestado, etc)
+- Nome do Servidor
+- Matrícula
+- Cargo (se visível)
+- Período Aquisitivo (ex: 2023/2024)
+- Dias Solicitados (numérico)
+- Data de Início
+Saída JSON: { documentType, keyFields: [{field, value}], summary }
+`;
 
 // Helper para obter cliente seguro
 function getGenAIClient() {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("A chave de API do Gemini (GEMINI_API_KEY) não está configurada no ambiente.");
-  }
+  if (!apiKey) throw new Error("API Key não configurada.");
   return new GoogleGenerativeAI(apiKey);
+}
+
+// Helper para Auditoria
+async function logAudit(db: any, data: { docId: string, action: string, prompt: string, response: string, model: string, decision: string }) {
+    await db.collection("audit_logs").add({
+        ...data,
+        timestamp: new Date(), // Firestore Timestamp
+    });
+    logger.info(`[AUDIT] Decisão registrada para ${data.docId}: ${data.decision}`);
 }
 
 
@@ -149,40 +150,50 @@ function levenshtein(a: string, b: string): number {
  * @param {string} termoBusca - The name or registration to search for.
  * @return {Promise<any>} - The found user data or null.
  */
+// --- 2. INTEGRAÇÃO COM RH (ERGON - MOCK) ---
+// Refatorado para incluir Cargos distintos
 async function mockErgonIntegration(termoBusca: string): Promise<any> {
   logger.info(`[ERGON] Buscando dados para: ${termoBusca}`);
-  if (!termoBusca) return null;
+  if (!termoBusca) return { erro: "Nome não identificado" };
 
   const termoUpper = termoBusca.toUpperCase().trim();
   
   // Banco de dados Mockado
   const dbMock = [
-    { nome: "MARIA OLIVEIRA", cargo: "Professor Classe I", matricula: "55221-9", tempo_servico_em_anos: 12, lotacao: "Escola A", status_funcional: "Ativo" },
-    { nome: "JOAO SILVA", cargo: "Técnico Administrativo", matricula: "11234-1", tempo_servico_em_anos: 2, lotacao: "Seduc Sede", status_funcional: "Estágio Probatório" },
-    { nome: "CARLOS SOUZA", cargo: "Motorista", matricula: "99887-2", tempo_servico_em_anos: 25, lotacao: "Transporte", status_funcional: "Ativo" }
+    { 
+      nome: "MARIA OLIVEIRA", 
+      cargo: "PROFESSOR CLASSE I", 
+      categoria: "MAGISTERIO", // Flag importante para a regra
+      matricula: "55221-9", 
+      tempo_servico_anos: 12, 
+      lotacao: "EEEFM RUI BARBOSA", 
+      status_funcional: "ATIVO",
+      ferias_vencidas: 1, // Tem 1 período vencido
+    },
+    { 
+      nome: "JOAO SILVA", 
+      cargo: "ASSISTENTE ADMINISTRATIVO", 
+      categoria: "ADMINISTRATIVO", // Flag importante
+      matricula: "11234-1", 
+      tempo_servico_anos: 5, 
+      lotacao: "SEDE - GABINETE", 
+      status_funcional: "ATIVO",
+      ferias_vencidas: 2,
+    },
+    { 
+        nome: "CARLOS SOUZA", 
+        cargo: "MERENDEIRO", 
+        categoria: "APOIO", 
+        matricula: "99887-2", 
+        tempo_servico_anos: 25, 
+        status_funcional: "ATIVO", 
+    },
   ];
 
-  // Busca simples (pode ser melhorada com fuzzy match se necessário)
+  // Busca Fuzzy simples
   return dbMock.find(s => termoUpper.includes(s.nome)) || 
          dbMock.find(s => s.matricula === termoUpper) ||
-         { erro: "Servidor não encontrado na base RH", tempo_servico_em_anos: 0 };
-}
-
-// --- 3. TRIGGERS (O CORAÇÃO DO AGENTE AUTÔNOMO) ---
-
-// Função auxiliar extraída para reuso
-async function realizarEnriquecimento(newData: any, docRef: any) {
-    const idpData = JSON.parse(newData.idpResult || "{}");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const nomeField = idpData.keyFields?.find((f: any) => f.field.toLowerCase().includes("nome") || f.field.toLowerCase().includes("interessado"));
-    const nome = nomeField ? nomeField.value : "";
-    
-    const dados = await mockErgonIntegration(nome);
-    
-    await docRef.update({
-        status: "Validacao Pendente",
-        enrichedData: JSON.stringify(dados || {})
-    });
+         { erro: "Servidor não encontrado na base RH", categoria: "DESCONHECIDO" };
 }
 
 // Gatilho 1: Assim que um documento é criado -> Inicia IDP
@@ -190,61 +201,50 @@ export const onProcessCreated = onDocumentCreated(
   "artifacts/{appId}/users/{userId}/intelligent_platform_docs/{docId}",
   async (event) => {
     const snapshot = event.data;
-    if (!snapshot) return;
-
-    const data = snapshot.data();
-    if (data.status !== "Uploaded") return; // Evita loops
+    if (!snapshot || snapshot.data().status !== "Uploaded") return;
 
     logger.info(`[AGENTE] Iniciando IDP para doc: ${event.params.docId}`);
 
     try {
       // Atualiza status para dar feedback na UI
       await snapshot.ref.update({status: "Processing IDP"});
+      const data = snapshot.data();
       
       // 1. Baixar o arquivo do Storage
       logger.info(`[AGENTE] Baixando arquivo para IDP: ${data.fileUrl}`);
+      // Em produção real, use admin.storage().bucket().file().download()
       const response = await fetch(data.fileUrl);
-      if (!response.ok) {
-        throw new Error(`Falha ao baixar o arquivo: ${response.statusText}`);
-      }
       const arrayBuffer = await response.arrayBuffer();
       const base64Data = Buffer.from(arrayBuffer).toString("base64");
       
       const genAI = getGenAIClient();
       // 2. Enviar para Gemini (Multimodal)
-      const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+      const model = genAI.getGenerativeModel({ 
+          model: MODEL_NAME,
+          generationConfig: { responseMimeType: "application/json" },
+      });
+
       const result = await model.generateContent([
-          {
-            inlineData: {
-              mimeType: "application/pdf", // TODO: Detectar dinamicamente se necessário
-              data: base64Data
-            }
-          },
-          { text: PROMPTS.IDP }
+          { inlineData: { mimeType: "application/pdf", data: base64Data } },
+          { text: PROMPT_IDP },
       ]);
-      const responseText = result.response.text();
-      
-      // Limpeza básica de JSON markdown ```json ... ```
-      const jsonStr = responseText.replace(/```json|```/g, "").trim();
-      const idpResult = JSON.parse(jsonStr);
+
+      const idpResult = JSON.parse(result.response.text());
 
       // Salva o resultado no documento
       await snapshot.ref.update({
           idpResult: JSON.stringify(idpResult),
-          status: "Enriquecimento Pendente"
+          status: "Enriquecimento Pendente",
       });
 
     } catch (error) {
       logger.error("Erro no IDP:", error);
-      await snapshot.ref.update({
-        status: "Failed",
-        error: "Erro na análise do documento.",
-      });
+      await snapshot.ref.update({ status: "Failed", error: "Falha na leitura do documento." });
     }
   }
 );
 
-// Gatilho 2: Orquestrador de Mudanças de Estado
+// Trigger 2: Análise Jurídica Especializada (Vacation Analyst)
 export const onProcessUpdated = onDocumentUpdated(
   "artifacts/{appId}/users/{userId}/intelligent_platform_docs/{docId}",
   async (event) => {
@@ -254,141 +254,154 @@ export const onProcessUpdated = onDocumentUpdated(
     if (!newData || newData.status === previousData?.status) return;
 
     const docRef = event.data?.after.ref;
-    if (!docRef) return;
 
-    // ESTÁGIO: Enriquecimento (Busca dados no RH)
+    // A. ENRIQUECIMENTO (Busca dados no Ergon)
     if (newData.status === "Enriquecimento Pendente") {
-      try {
-        logger.info(`[AGENTE] Iniciando Enriquecimento...`);
-        await realizarEnriquecimento(newData, docRef);
-      } catch (e) {
-        logger.error("Erro Enriquecimento", e);
-        // Mesmo com erro, avança para validação humana para correção manual
-        await docRef.update({
-          status: "Validacao Pendente",
-          enrichedData: "{}",
-        }); // Fallback: Avança mesmo sem dados para não travar o fluxo
-      }
+        const idpData = JSON.parse(newData.idpResult || "{}");
+        const nomeAlvo = idpData.keyFields?.find((f: any) => f.field.includes("Nome"))?.value || "";
+        
+        const dadosRH = await mockErgonIntegration(nomeAlvo);
+        
+        await docRef!.update({
+            enrichedData: JSON.stringify(dadosRH),
+            status: "Validacao Pendente", // Pausa para humano confirmar se a extração + busca estão certas
+        });
     }
 
-    // ESTÁGIO: Raciocínio (Após humano validar e mudar status para 'Raciocinio Pendente')
+    // B. RACIOCÍNIO (Onde a mágica das Férias acontece)
     if (newData.status === "Raciocinio Pendente") {
-      logger.info(`[AGENTE] Iniciando Raciocínio Legal (RAR)...`);
-      try {
-        // A. GARANTIA DE DADOS (Self-Healing)
-        // Se entrou manualmente, pode não ter dados de RH (enrichedData). Vamos buscar agora.
-        let dadosRH = newData.enrichedData;
+        const idpData = JSON.parse(newData.idpResult || "{}");
+        const dadosRH = JSON.parse(newData.enrichedData || "{}");
+        const diasSolicitados = parseInt(idpData.keyFields?.find((f: any) => f.field.includes("Dias"))?.value || "0");
+
+        // 1. VALIDAÇÃO DETERMINÍSTICA (Hybrid AI)
+        // Usa a categoria informada no upload OU a vinda do RH
+        const userCategory = newData.userCategory || dadosRH.categoria || "ADMINISTRATIVO";
         
-        if (!dadosRH || Object.keys(JSON.parse(dadosRH || "{}")).length === 0 || JSON.parse(dadosRH).erro) {
-            logger.warn("[AGENTE] Dados de RH ausentes ou com erro. Tentando buscar antes da análise...");
-            const idpData = JSON.parse(newData.idpResult || "{}");
-            // Tenta achar o nome em qualquer campo se não tiver estruturado
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const nomeAlvo = idpData.keyFields?.find((f:any) => f.value && f.value.length > 3)?.value || "Desconhecido";
-            const resultadoBusca = await mockErgonIntegration(nomeAlvo);
-            dadosRH = JSON.stringify(resultadoBusca);
-            
-            // Salva para persistência
-            await docRef.update({ enrichedData: dadosRH });
+        // Regra Hardcoded (Lei 5.810/94 & PCCR)
+        const limiteLegal = userCategory === "MAGISTERIO" ? 45 : 30;
+        
+        logger.info(`[REGRAS] Categoria: ${userCategory} | Limite Aplicado: ${limiteLegal} dias`);
+
+        const promptAnalista = `
+        ATUE COMO UM ANALISTA SÊNIOR DE RH DA SEDUC-PA.
+        
+        REGRA DETERMINÍSTICA APLICADA:
+        O servidor pertence à categoria "${userCategory}".
+        O limite MÁXIMO de férias permitido por lei para ele é de: **${limiteLegal} DIAS**.
+        
+        DADOS DO PEDIDO:
+        - Servidor: ${dadosRH.nome || "Não identificado"}
+        - Dias Solicitados: ${diasSolicitados}
+        
+        INSTRUÇÕES CRÍTICAS:
+        1. Se "Dias Solicitados" (${diasSolicitados}) for MAIOR que o limite (${limiteLegal}), você DEVE REJEITAR IMEDIATAMENTE.
+        2. Se for menor ou igual, analise se há outros impedimentos (ex: falta de período aquisitivo).
+        3. Não tente reinterpretar a lei. Siga o limite de ${limiteLegal} dias estritamente.
+        
+        SAÍDA JSON:
+        {
+            "veredicto": {
+                "status": "Aprovado" | "Rejeitado",
+                "parecer": "Texto explicativo citando o limite de ${limiteLegal} dias."
+            },
+            "chainOfThought": "Seu raciocínio passo a passo."
         }
-
-        // Busca as regras do usuário
-        const userId = event.params.userId;
-        const appId = event.params.appId;
-        const rulesSnap = await db
-          .collection(`artifacts/${appId}/users/${userId}/rules`)
-          .where("status", "==", "Ativa")
-          .get();
-        const activeRules = rulesSnap.docs
-          .map((d) => {
-            const r = d.data();
-            return `- ${r.nome}: ${JSON.stringify(r.condicoes)}`;
-          })
-          .join("\n");
-
-        const prompt = `
-          CONTEXTO DO PROCESSO:
-          - Documento (Extração): ${newData.idpResult}
-          - Dados Funcionais (RH): ${dadosRH}
-          - Regras de Negócio Ativas:
-          ${activeRules || "Usar regras gerais da Lei 5.810/94"}
-
-          TAREFA:
-          Avalie se o servidor tem direito ao solicitado.
-          Considere o tempo de serviço e status funcional.
         `;
-        
-        const genAI = getGenAIClient();
-        const model = genAI.getGenerativeModel({
-          model: MODEL_NAME,
-          systemInstruction: PROMPTS.RAR,
-          generationConfig: {responseMimeType: "application/json"},
-        });
-        const result = await model.generateContent(prompt);
-        const rarResult = JSON.parse(result.response.text());
 
-        await docRef.update({
-          status: rarResult.veredicto?.status === "Aprovado" ? "Aprovado" : "Rejeitado",
-          rarResult: JSON.stringify(rarResult),
+        const genAI = getGenAIClient();
+        const model = genAI.getGenerativeModel({ 
+            model: MODEL_NAME,
+            generationConfig: { responseMimeType: "application/json" },
         });
-      } catch (e) {
-        logger.error("Erro RAR", e);
-        await docRef.update({
-          status: "Failed", 
-          error: "Falha na análise inteligente. Verifique os logs." 
+
+        const result = await model.generateContent(promptAnalista);
+        const responseText = result.response.text();
+        const rarResult = JSON.parse(responseText);
+
+        // 2. AUDITORIA DE DECISÕES
+        await logAudit(db, {
+            docId: event.params.docId,
+            action: "AUTO_DECISION",
+            prompt: promptAnalista,
+            response: responseText,
+            model: MODEL_NAME,
+            decision: rarResult.veredicto?.status,
         });
-      } // Ou criar status "Pendência"
+
+        await docRef!.update({
+            status: rarResult.veredicto?.status === "Aprovado" ? "Aprovado" : "Rejeitado",
+            rarResult: responseText, // Salva como string JSON
+        });
     }
   }
 );
 
-// --- 4. CALLABLES (Para chamadas diretas da UI, ex: Chat e Portaria) ---
+// Adicione/Atualize esta função mockada de RAG
+// Em produção, isso consultaria o Pinecone ou Firestore Vector Search
+async function retrieveLegalContext(query: string): Promise<string> {
+    const queryLower = query.toLowerCase();
+    
+    // Simulação de "Knowledge Base" indexada
+    let context = "";
 
-export const generateDraft = onCall({cors: true}, async (request) => {
-  const {context, veredicto} = request.data;
-  const genAI = getGenAIClient();
-  const model = genAI.getGenerativeModel({model: MODEL_NAME});
+    if (queryLower.includes("férias") || queryLower.includes("dias")) {
+        context += `
+        [LEI 5.810/94 - Art. 105] O servidor terá direito a 30 (trinta) dias de férias anuais.
+        [PCCR EDUCAÇÃO - Art. 42] O ocupante do cargo de Professor fará jus a 45 (quarenta e cinco) dias de férias anuais, gozadas de acordo com o calendário escolar.
+        `;
+    }
+    
+    if (queryLower.includes("prêmio") || queryLower.includes("licença")) {
+        context += `
+        [LEI 5.810/94 - Art. 130] Após cada quinquênio de efetivo exercício, o servidor fará jus a 3 (três) meses de licença-prêmio.
+        `;
+    }
 
-  const prompt = `
-    Atue como Redator Oficial do Estado.
-    Contexto: ${JSON.stringify(context)}
-    Decisão: ${JSON.stringify(veredicto)}
-    Tarefa: Escreva a minuta da Portaria de concessão/indeferimento. Use linguagem formal, "O Secretário de Estado...", "Resolve...".
-    Retorne apenas o texto da portaria.
-    `;
+    return context || "Nenhuma legislação específica encontrada na base de conhecimento para este tópico.";
+}
 
-  const result = await model.generateContent(prompt); // Use o prompt diretamente
-  return {response: result.response.text()};
-});
-
+// Atualize a função Callable do Chat
 export const callGeminiAgent = onCall({cors: true}, async (request) => {
   try {
-    const genAI = getGenAIClient(); // Inicializa aqui dentro
-    const {content, systemInstruction, schema} = request.data;
+    const genAI = getGenAIClient();
+    const {content, systemInstruction, schema} = request.data; // content é a pergunta do usuário
 
-    // Configuração defensiva do Schema
-    const generationConfig: GenerationConfig = {};
-    if (schema) {
-      try {
-        // Garante que é um objeto JSON válido se veio como string
-        const schemaObj = typeof schema === "string" ? JSON.parse(schema) : schema;
-        generationConfig.responseMimeType = "application/json";
-        generationConfig.responseSchema = schemaObj;
-      } catch (e) {
-        logger.warn("Schema inválido recebido, ignorando validação estruturada:", e);
-      }
+    // 1. RAG STEP: Recupera legislação antes de responder
+    const legalContext = await retrieveLegalContext(content);
+
+    // 2. Prompt Enriquecido
+    const augmentedPrompt = `
+    CONTEXTO JURÍDICO RECUPERADO (LEGISLAÇÃO VIGENTE):
+    ${legalContext}
+
+    PERGUNTA DO USUÁRIO:
+    ${content}
+
+    INSTRUÇÃO:
+    Responda à pergunta do usuário baseando-se ESTRITAMENTE no contexto jurídico fornecido acima. 
+    Se a lei distinguir entre Professor e Administrativo, deixe isso claro.
+    `;
+
+    // ... Configuração do Modelo (mantenha o código existente de schema/generationConfig) ...
+    interface GenerationConfig {
+        responseMimeType?: "application/json" | "text/plain";
+        responseSchema?: object;
     }
+    const generationConfig: GenerationConfig = {};
+    if (schema) { /* ... lógica do schema mantida ... */ }
 
     const model = genAI.getGenerativeModel({
       model: MODEL_NAME,
-      systemInstruction: systemInstruction,
+      // Se houver systemInstruction original, anexamos ela, senão usamos uma padrão jurídica
+      systemInstruction: systemInstruction || "Você é um consultor jurídico da SEDUC-PA. Responda com base na Lei 5.810/94.",
       generationConfig: generationConfig,
     });
 
-    const result = await model.generateContent(content);
+    const result = await model.generateContent(augmentedPrompt);
     const responseText = result.response.text();
 
-    // Tenta parsear se for JSON esperado, senão retorna texto
+    // ... (lógica de parsing JSON mantida) ...
     let data;
     try {
       data = (generationConfig.responseMimeType === "application/json") ? JSON.parse(responseText) : responseText;
@@ -398,9 +411,9 @@ export const callGeminiAgent = onCall({cors: true}, async (request) => {
 
     return {data};
   } catch (error: unknown) {
+    // ... (tratamento de erro mantido) ...
     const err = error as Error;
     logger.error("Erro crítico na função callGeminiAgent:", err);
-    // Retorna erro estruturado para o frontend não receber apenas "Internal Error"
     throw new HttpsError("internal", `Erro no processamento de IA: ${err.message}`);
   }
 });

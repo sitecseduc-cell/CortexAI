@@ -29,7 +29,7 @@ const generateOfficialAct = async () => {
     isGeneratingPortaria.value = true;
     try {
         const processContext = {
-            nome: idpData.value?.keyFields?.find(f => f.field.includes('Nome'))?.value,
+            nome: idpData.value?.keyFields?.find(f => f.field?.includes('Nome'))?.value,
             // ... outros campos
         };
         

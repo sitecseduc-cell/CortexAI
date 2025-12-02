@@ -17,11 +17,16 @@ import {getFirestore} from "firebase-admin/firestore";
 initializeApp();
 const db = getFirestore();
 
-const API_KEY = process.env.GEMINI_API_KEY || "";
-const genAI = new GoogleGenerativeAI(API_KEY);
+// NÃO inicialize o cliente globalmente com process.env, pois pode falhar no deploy
+// const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); <--- REMOVIDO
 
 // --- 1. PROMPTS & CONFIG ---
 const MODEL_NAME = "gemini-1.5-flash";
+
+interface GenerationConfig {
+    responseMimeType?: "application/json" | "text/plain";
+    responseSchema?: object;
+}
 
 const PROMPTS = {
   IDP: `Você é um motor IDP (Intelligent Document Processing) para o governo.
@@ -39,6 +44,16 @@ const PROMPTS = {
 };
 
 // --- 2. FUNÇÕES AUXILIARES ---
+
+// Helper para obter cliente seguro
+function getGenAIClient() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("A chave de API do Gemini (GEMINI_API_KEY) não está configurada no ambiente.");
+  }
+  return new GoogleGenerativeAI(apiKey);
+}
+
 
 // Helper: Calcular Similaridade de Cosseno
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
@@ -195,6 +210,7 @@ export const onProcessCreated = onDocumentCreated(
       const arrayBuffer = await response.arrayBuffer();
       const base64Data = Buffer.from(arrayBuffer).toString("base64");
       
+      const genAI = getGenAIClient();
       // 2. Enviar para Gemini (Multimodal)
       const model = genAI.getGenerativeModel({ model: MODEL_NAME });
       const result = await model.generateContent([
@@ -302,6 +318,7 @@ export const onProcessUpdated = onDocumentUpdated(
           Considere o tempo de serviço e status funcional.
         `;
         
+        const genAI = getGenAIClient();
         const model = genAI.getGenerativeModel({
           model: MODEL_NAME,
           systemInstruction: PROMPTS.RAR,
@@ -329,6 +346,7 @@ export const onProcessUpdated = onDocumentUpdated(
 
 export const generateDraft = onCall({cors: true}, async (request) => {
   const {context, veredicto} = request.data;
+  const genAI = getGenAIClient();
   const model = genAI.getGenerativeModel({model: MODEL_NAME});
 
   const prompt = `
@@ -344,37 +362,45 @@ export const generateDraft = onCall({cors: true}, async (request) => {
 });
 
 export const callGeminiAgent = onCall({cors: true}, async (request) => {
-  const {content, systemInstruction, schema} = request.data;
-
-  // Configura o modelo (suporta JSON Schema se fornecido)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const generationConfig: any = {};
-  if (schema) {
-    try {
-      generationConfig.responseMimeType = "application/json";
-      generationConfig.responseSchema = JSON.parse(schema);
-    } catch (e) {
-      logger.warn("Schema inválido fornecido, ignorando validação estrita.", e);
-    }
-  }
-
-  const model = genAI.getGenerativeModel({
-    model: MODEL_NAME,
-    systemInstruction: systemInstruction,
-    generationConfig: generationConfig,
-  });
-
   try {
+    const genAI = getGenAIClient(); // Inicializa aqui dentro
+    const {content, systemInstruction, schema} = request.data;
+
+    // Configuração defensiva do Schema
+    const generationConfig: GenerationConfig = {};
+    if (schema) {
+      try {
+        // Garante que é um objeto JSON válido se veio como string
+        const schemaObj = typeof schema === "string" ? JSON.parse(schema) : schema;
+        generationConfig.responseMimeType = "application/json";
+        generationConfig.responseSchema = schemaObj;
+      } catch (e) {
+        logger.warn("Schema inválido recebido, ignorando validação estruturada:", e);
+      }
+    }
+
+    const model = genAI.getGenerativeModel({
+      model: MODEL_NAME,
+      systemInstruction: systemInstruction,
+      generationConfig: generationConfig,
+    });
+
     const result = await model.generateContent(content);
     const responseText = result.response.text();
-    
-    // Retorna no formato { data: ... } para casar com o geminiService.js
-    // O frontend espera result.data.data
-    return {
-      data: schema ? JSON.parse(responseText) : responseText,
-    };
-  } catch (error) {
-    logger.error("Erro na chamada direta do Gemini:", error);
-    throw new HttpsError("internal", "Erro ao processar solicitação com IA.");
+
+    // Tenta parsear se for JSON esperado, senão retorna texto
+    let data;
+    try {
+      data = (generationConfig.responseMimeType === "application/json") ? JSON.parse(responseText) : responseText;
+    } catch {
+      data = responseText;
+    }
+
+    return {data};
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error("Erro crítico na função callGeminiAgent:", err);
+    // Retorna erro estruturado para o frontend não receber apenas "Internal Error"
+    throw new HttpsError("internal", `Erro no processamento de IA: ${err.message}`);
   }
 });

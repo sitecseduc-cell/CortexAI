@@ -1,15 +1,10 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { X, Zap, UploadCloud, FileText, CheckCircle, Loader2 } from 'lucide-vue-next';
+import { supabase } from '@/libs/supabase'; // Importe o novo cliente
 // Importa a lista completa de processos que criamos
 import { PROCESSOS_CCM } from '@/constants/processes';
-// Imports do Firebase Storage e Firestore
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { collection, addDoc } from 'firebase/firestore'; // Use addDoc para criar ID automático
-import { storage, db, auth } from '@/libs/firebase';
-import { useAuth } from '@/composables/useAuth'; // Para pegar o ID do usuário
 
-const { user } = useAuth();
 const emit = defineEmits(['close']);
 const isUploading = ref(false);
 // Adicione um ref para a categoria
@@ -32,57 +27,69 @@ const handleDrop = (event) => {
 };
 
 const handleStart = async () => {
-    if (!user.value) return alert("Erro: Usuário não autenticado");
-
+    if (!selectedFile.value) return;
     isUploading.value = true;
-    const proc = PROCESSOS_CCM.find(p => p.id === selectedProcessId.value);
 
     try {
-        let fileUrl = null;
-        let storagePath = null;
-
-        // 1. Upload para o Firebase Storage
-        if (selectedFile.value) {
-            const fileName = `${Date.now()}_${selectedFile.value.name}`;
-            // Caminho: uploads/{userId}/{fileName}
-            storagePath = `uploads/${user.value.uid}/${fileName}`;
-            const fileRef = storageRef(storage, storagePath);
-            
-            // Realiza o upload
-            const snapshot = await uploadBytes(fileRef, selectedFile.value);
-            // Obtém a URL pública para o backend baixar
-            fileUrl = await getDownloadURL(snapshot.ref);
-        } else {
-            // Lógica de template (fallback) se desejar manter
-            fileUrl = null; 
-        }
-
-        // 2. Salva Metadados no Firestore (Leve)
-        // Caminho dinâmico conforme suas regras: artifacts/{appId}/users/{userId}/intelligent_platform_docs
-        const appId = 'default-autonomous-agent'; 
-        const docsPath = `artifacts/${appId}/users/${user.value.uid}/intelligent_platform_docs`;
-        
-        await addDoc(collection(db, docsPath), {
-            name: selectedFile.value?.name || proc.nome,
-            fileUrl: fileUrl,       // URL do arquivo no Storage
-            storagePath: storagePath,
-            processo: proc.id,
-            processoNome: proc.nome,
-            
-            // --- NOVO CAMPO ---
-            userCategory: userCategory.value, 
-            // ------------------
-
-            uid: user.value.uid, // IMPORTANTE: Salvar o UID no documento para uso na UI
-            status: fileUrl ? 'Uploaded' : 'Enriquecimento Pendente',     // Gatilho para a Cloud Function
-            timestamp: Date.now(),
+        // 1. Converter Arquivo para Base64 (Para enviar ao Gemini)
+        // Promisify FileReader to work well with async/await
+        const base64String = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(selectedFile.value);
+            reader.onload = () => resolve(reader.result.split(',')[1]); // Remove header
+            reader.onerror = (error) => reject(error);
         });
+
+        // 2. Chamar nossa nova API Serverless (Backend no Vercel)
+        const apiResponse = await fetch('/api/process-vacation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                fileBase64: base64String,
+                userCategory: userCategory.value
+            })
+        });
+
+        if (!apiResponse.ok) {
+            const errorBody = await apiResponse.text();
+            throw new Error(`Falha na análise da IA: ${errorBody}`);
+        }
+        const resultadoIA = await apiResponse.json();
+
+        // 3. Salvar no Supabase (Banco de Dados)
+        // Upload do arquivo para o Storage do Supabase (Bucket "documentos")
+        const fileName = `${Date.now()}_${selectedFile.value.name}`;
+        const { data: fileData, error: uploadError } = await supabase
+            .storage
+            .from('documentos')
+            .upload(fileName, selectedFile.value);
+
+        if (uploadError) throw uploadError;
+
+        // Obter URL pública
+        const { data: { publicUrl } } = supabase
+            .storage
+            .from('documentos')
+            .getPublicUrl(fileName);
+
+        // Inserir registro na tabela "processos"
+        const { error: dbError } = await supabase
+            .from('processos')
+            .insert([{
+                nome_arquivo: selectedFile.value.name,
+                url_arquivo: publicUrl,
+                status: resultadoIA.veredicto.status, // Já vem pronto da IA!
+                resultado_ia: resultadoIA, // JSON completo
+                categoria_usuario: userCategory.value,
+            }]);
+
+        if (dbError) throw dbError;
 
         emit('close');
 
     } catch (error) {
-        console.error("Erro no upload:", error);
-        alert("Falha ao enviar documento.");
+        console.error("Erro no processamento:", error);
+        alert("Erro ao processar: " + error.message);
     } finally {
         isUploading.value = false;
     }

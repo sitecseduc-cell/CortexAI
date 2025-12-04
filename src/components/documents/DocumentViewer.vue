@@ -3,8 +3,8 @@ import { ref, computed, watch } from 'vue';
 import { safeParse } from '@/utils/helpers';
 import VuePdfEmbed from 'vue-pdf-embed';
 import { CheckCircle, XCircle, AlertTriangle, User, FileText, Save, Loader2, FileSignature } from 'lucide-vue-next';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db, auth } from '@/libs/firebase';
+// import { doc, updateDoc } from 'firebase/firestore'; // REMOVER
+// import { db, auth } from '@/libs/firebase'; // REMOVER - Substituir por Supabase auth
 import { geminiApiService } from '@/services/geminiService'; // Adicionado se faltar
 import { useTypewriter } from '@/composables/useTypewriter';
 
@@ -32,7 +32,8 @@ const startValidation = () => {
 };
 
 const confirmValidation = async () => {
-    if(!props.doc.id || !auth.currentUser) return;
+    // TODO: Substituir auth.currentUser pela verificação de usuário do Supabase
+    if(!props.doc.id /* || !supabase.auth.user() */) return;
     
     // Emite o evento para o pai (PlatformView) lidar com a atualização
     emit('validate', { docId: props.doc.id, data: editForm.value });
@@ -87,14 +88,14 @@ const generateOfficialAct = async () => {
             <div class="flex items-center gap-2">
                 <span class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider"
                       :class="{
-                          'bg-yellow-500/20 text-yellow-400': (doc.status || '').includes('Aguardando') || (doc.status || '').includes('Pendente'),
-                          'bg-green-500/20 text-green-400': doc.status === 'Aprovado',
-                          'bg-red-500/20 text-red-400': doc.status === 'Rejeitado',
-                          'bg-blue-500/20 text-blue-400': (doc.status || '').includes('Processing') || doc.status === 'Em Análise'
+                          'bg-yellow-500/20 text-yellow-400': (doc?.status || '').includes('Aguardando') || (doc?.status || '').includes('Pendente'),
+                          'bg-green-500/20 text-green-400': doc?.status === 'Aprovado',
+                          'bg-red-500/20 text-red-400': doc?.status === 'Rejeitado',
+                          'bg-blue-500/20 text-blue-400': (doc?.status || '').includes('Processing') || doc?.status === 'Em Análise'
                       }">
-                    {{ doc.status || 'Pendente' }}
+                    {{ doc?.status || 'Processando...' }}
                 </span>
-                <span class="text-slate-500 text-xs">{{ new Date(doc.timestamp || Date.now()).toLocaleDateString() }}</span>
+                <span class="text-slate-500 text-xs">{{ doc?.timestamp ? new Date(doc.timestamp).toLocaleDateString() : '...' }}</span>
             </div>
         </div>
 

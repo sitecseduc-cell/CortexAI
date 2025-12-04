@@ -1,7 +1,7 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { useSupabaseCollection } from '@/composables/useFirestore'; // Corrigido para o nome de arquivo existente
+import { useSupabaseCollection } from '@/composables/useFirestore'; // MANTIDO NOME DO ARQUIVO PARA COMPATIBILIDADE
 import { useAuth } from '@/composables/useAuth';
 import Sidebar from '@/components/layout/Sidebar.vue';
 
@@ -9,10 +9,12 @@ const { user } = useAuth();
 const router = useRouter();
 const route = useRoute();
 
+const appId = 'default-autonomous-agent';
+
 // O ID do processo selecionado é pego da URL
 const selectedDocId = computed(() => route.params.id || null);
 
-// Busca os documentos do Supabase
+// Busca os documentos do Supabase (Tabela 'processos')
 const { data: documents } = useSupabaseCollection('processos');
 
 const handleSelect = (docId) => {

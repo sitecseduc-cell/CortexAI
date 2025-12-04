@@ -27,25 +27,27 @@ watch(() => props.doc, (newDoc) => {
 }, { immediate: true });
 
 const startValidation = () => {
-    // Clona profundamente para evitar mutação direta do prop
-    editForm.value = JSON.parse(JSON.stringify(idpData.value));
+    // Clona profundamente os dados a serem editados
+    const currentIdpData = safeParse(props.doc.resultado_ia)?.keyFields || [];
+    editForm.value = JSON.parse(JSON.stringify(currentIdpData));
     isEditing.value = true;
 };
 
 const { user } = useAuth();
 
 const confirmValidation = async () => {
-    if (!props.doc.id || !user.value) {
-        alert("Documento ou usuário inválido.");
+    if (!props.doc.id) {
+        alert("Documento inválido.");
         return;
     }
 
     // Prepara o novo objeto `resultado_ia` com os dados editados
     const updatedIaResult = {
-        ...props.doc.resultado_ia,
+        ...(safeParse(props.doc.resultado_ia) || {}), 
         keyFields: editForm.value
     };
     
+    // Atualiza no Supabase
     const { error } = await supabase
         .from('processos')
         .update({ 
@@ -57,7 +59,7 @@ const confirmValidation = async () => {
     if (error) {
         alert("Erro ao salvar validação: " + error.message);
     } else {
-        emit('process-updated'); // Notifica o componente pai para recarregar a lista
+        emit('process-updated'); 
     }
     isEditing.value = false;
 };
@@ -77,6 +79,7 @@ const generateOfficialAct = async () => {
             decisao: analiseData.value
         };
         
+        // Chamada à API refatorada
         const result = await geminiApiService.generateDraft(processContext, analiseData.value);
         const fullText = typeof result === 'string' ? result : result.response;
         

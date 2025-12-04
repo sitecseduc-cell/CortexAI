@@ -4,7 +4,7 @@ import { Shield, Plus, Trash, Save, X, Check } from 'lucide-vue-next';
 import { supabase } from '@/libs/supabase';
 import { useToastStore } from '@/stores/toast';
 
-const props = defineProps(['rules']); // rulesCollectionPath não é mais necessário
+const props = defineProps(['rules', 'rulesTable']); // rulesTable substitui rulesCollectionPath
 const toast = useToastStore();
 
 const editingId = ref(null);
@@ -36,42 +36,38 @@ const removeCondition = (index) => {
 };
 
 const saveRule = async () => {
+  if (!props.rulesTable) {
+      toast.addToast('Erro: Tabela de regras não definida.', 'error');
+      return;
+  }
+
   try {
-    // Converte valores numéricos se necessário
+    // 1. Limpeza/conversão de dados
     const cleanConditions = tempRule.value.condicoes.map(c => ({
         ...c,
         valor: !isNaN(c.valor) && c.valor !== '' ? Number(c.valor) : c.valor
     }));
 
-    const rulePayload = {
+    const ruleToSave = {
         nome: tempRule.value.nome,
-        condicoes: cleanConditions, // Certifique-se que sua coluna no Supabase é JSONB
+        condicoes: cleanConditions,
         acao_se_verdadeiro: tempRule.value.acao_se_verdadeiro,
         status: tempRule.value.status || 'Ativa'
-        // Adicione user_id se necessário: user_id: supabase.auth.user().id
     };
+    
+    // 2. Usando Supabase para salvar/atualizar
+    const { error } = await supabase
+      .from(props.rulesTable)
+      .update(ruleToSave)
+      .eq('id', editingId.value); // Atualiza pelo ID
 
-    let result;
-    if (editingId.value) {
-        // Update
-        result = await supabase
-            .from('regras')
-            .update(rulePayload)
-            .eq('id', editingId.value);
-    } else {
-        // Create (caso adicione funcionalidade de criar nova)
-        result = await supabase
-            .from('regras')
-            .insert([rulePayload]);
-    }
-
-    if (result.error) throw result.error;
+    if (error) throw error;
     
     toast.addToast('Regra atualizada com sucesso!', 'success');
     editingId.value = null;
   } catch (e) {
     console.error(e);
-    toast.addToast('Erro ao salvar regra.', 'error');
+    toast.addToast('Erro ao salvar regra: ' + e.message, 'error');
   }
 };
 </script>

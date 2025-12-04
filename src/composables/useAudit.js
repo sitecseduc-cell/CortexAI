@@ -2,7 +2,7 @@ import { supabase } from '@/libs/supabase';
 import { useAuth } from '@/composables/useAuth';
 
 export function useAudit() {
-  const { user } = useAuth();
+  const { user } = useAuth(); // Já usa Supabase
 
   // Função nativa do browser para hash SHA-256 (SubtleCrypto)
   const generateHash = async (message) => {

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useAuth } from '@/composables/useAuth';
-import { useSupabaseCollection } from '@/composables/useFirestore'; // Corrigido para o nome de arquivo existente
+import { useSupabaseCollection } from '@/composables/useFirestore'; // MANTIDO NOME DO ARQUIVO PARA COMPATIBILIDADE
 import { supabase } from '@/libs/supabase'; 
 import { useToastStore } from '@/stores/toast';
 
@@ -23,21 +23,25 @@ const currentView = ref('dashboard');
 const selectedDocId = ref(null);
 const isUploadModalOpen = ref(false);
 
-// Em vez de Paths complexos, usamos nomes de tabelas
-// O Supabase usa RLS (Row Level Security) para filtrar por usuário no backend, 
-// mas podemos filtrar aqui também se necessário.
-const { data: documents } = useSupabaseCollection('processos'); 
-const { data: rules } = useSupabaseCollection('regras');
+const appId = 'default-autonomous-agent';
+
+// Caminhos/Tabelas (Ajustado para Supabase)
+const docsTable = 'processos';
+const rulesTable = 'regras'; 
+
+// Dados (Reativos via Supabase)
+const { data: documents } = useSupabaseCollection(docsTable);
+const { data: rules } = useSupabaseCollection(rulesTable);
 
 // --- AÇÕES ---
 
-// Validação Humana
+// Validação Humana (Atualiza Supabase)
 const onHumanValidation = async ({ docId, data }) => {
-    // Atualiza no Supabase
+    // Usando Supabase
     const { error } = await supabase
         .from('processos')
         .update({ 
-            resultado_ia: { ...data }, // Garanta que isso corresponda à estrutura da sua coluna JSONB
+            resultado_ia: data, 
             status: 'Raciocinio Pendente'
         })
         .eq('id', docId);
@@ -50,13 +54,16 @@ const onHumanValidation = async ({ docId, data }) => {
 };
 
 const handleManualAdvance = async ({ docId }) => {
+    // Usando Supabase
     const { error } = await supabase
         .from('processos')
-        .update({ status: 'Validacao Pendente' })
+        .update({ 
+            status: 'Validacao Pendente'
+        })
         .eq('id', docId);
     
     if (error) {
-        toastStore.addToast('Erro ao atualizar.', 'error');
+        toastStore.addToast('Erro ao avançar: ' + error.message, 'error');
     } else {
         toastStore.addToast('Avançado para validação manual.', 'warning');
     }
@@ -64,6 +71,7 @@ const handleManualAdvance = async ({ docId }) => {
 
 const handleDelete = async (id) => {
     if(confirm("Tem certeza que deseja excluir este processo?")) {
+        // Usando Supabase
         const { error } = await supabase
             .from('processos')
             .delete()
@@ -79,6 +87,7 @@ const handleDelete = async (id) => {
     }
 };
 
+// Função auxiliar para abrir upload de qualquer lugar
 const openUpload = () => { isUploadModalOpen.value = true; };
 </script>
 
@@ -157,7 +166,7 @@ const openUpload = () => { isUploadModalOpen.value = true; };
                     </div>
 
                     <div v-if="currentView === 'rules'" class="absolute inset-0 p-6 overflow-y-auto custom-scrollbar">
-                        <RuleManager :rules="rules" rulesTable="regras" />
+                        <RuleManager :rules="rules" :rulesTable="rulesTable" />
                     </div>
 
                     <div v-if="currentView === 'documents'" class="h-full flex flex-col bg-white dark:bg-slate-950">

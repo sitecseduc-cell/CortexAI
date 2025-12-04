@@ -1,7 +1,7 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { useFirestoreCollection } from '@/composables/useFirestore';
+import { useSupabaseCollection } from '@/composables/useSupabase'; // Alterado
 import { useAuth } from '@/composables/useAuth';
 import Sidebar from '@/components/layout/Sidebar.vue';
 
@@ -9,14 +9,12 @@ const { user } = useAuth();
 const router = useRouter();
 const route = useRoute();
 
-const appId = 'default-autonomous-agent';
-
 // O ID do processo selecionado é pego da URL
 const selectedDocId = computed(() => route.params.id || null);
 
-// Busca os documentos do Firestore
-const docsPath = computed(() => user.value ? `artifacts/${appId}/users/${user.value.uid}/intelligent_platform_docs` : null);
-const { data: documents } = useFirestoreCollection(docsPath);
+// Busca os documentos do Supabase
+const docsTable = ref('processos'); // Nome da tabela
+const { data: documents } = useSupabaseCollection(docsTable);
 
 const handleSelect = (docId) => {
   // Navega para a rota de detalhe do processo

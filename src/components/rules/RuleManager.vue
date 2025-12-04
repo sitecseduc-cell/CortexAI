@@ -1,11 +1,10 @@
 <script setup>
 import { ref } from 'vue';
 import { Shield, Plus, Trash, Save, X, Check } from 'lucide-vue-next';
-import { doc, setDoc } from 'firebase/firestore';
-import { db } from '@/libs/firebase'; 
+import { supabase } from '@/libs/supabase';
 import { useToastStore } from '@/stores/toast';
 
-const props = defineProps(['rules', 'rulesCollectionPath']);
+const props = defineProps(['rules', 'rulesTable']);
 const toast = useToastStore();
 
 const editingId = ref(null);
@@ -37,8 +36,8 @@ const removeCondition = (index) => {
 };
 
 const saveRule = async () => {
-  if (!props.rulesCollectionPath) {
-      toast.addToast('Erro: Caminho das regras não definido.', 'error');
+  if (!props.rulesTable) { // Alterado de rulesCollectionPath para rulesTable
+      toast.addToast('Erro: Tabela de regras não definida.', 'error');
       return;
   }
 
@@ -50,18 +49,36 @@ const saveRule = async () => {
     }));
 
     const ruleToSave = {
-        ...tempRule.value,
-        condicoes: cleanConditions
+        nome: tempRule.value.nome,
+        condicoes: cleanConditions,
+        acao_se_verdadeiro: tempRule.value.acao_se_verdadeiro,
+        status: tempRule.value.status || 'Ativa'
     };
 
-    const ruleRef = doc(db, props.rulesCollectionPath, editingId.value);
-    await setDoc(ruleRef, ruleToSave, { merge: true });
+    let error;
+    
+    if (editingId.value) {
+        // Update
+        const res = await supabase
+            .from(props.rulesTable)
+            .update(ruleToSave)
+            .eq('id', editingId.value);
+        error = res.error;
+    } else {
+        // Insert (se tivesse funcionalidade de criar nova)
+        const res = await supabase
+            .from(props.rulesTable)
+            .insert([ruleToSave]);
+        error = res.error;
+    }
+
+    if (error) throw error;
     
     toast.addToast('Regra atualizada com sucesso!', 'success');
     editingId.value = null;
   } catch (e) {
     console.error(e);
-    toast.addToast('Erro ao salvar regra.', 'error');
+    toast.addToast('Erro ao salvar regra: ' + e.message, 'error');
   }
 };
 </script>

@@ -1,11 +1,9 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useAuth } from '@/composables/useAuth';
-import { useFirestoreCollection } from '@/composables/useFirestore';
-import { useSeeder } from '@/composables/useSeeder';
+import { useSupabaseCollection } from '@/composables/useSupabase'; // <-- Mudança aqui
+import { supabase } from '@/libs/supabase'; 
 import { useToastStore } from '@/stores/toast';
-import { doc, deleteDoc, updateDoc } from 'firebase/firestore';
-import { db } from '@/libs/firebase';
 
 // Componentes
 import { LayoutDashboard, FileText, Shield, Wrench, Settings, PlusCircle } from 'lucide-vue-next';
@@ -16,7 +14,7 @@ import DocumentViewer from '@/components/documents/DocumentViewer.vue';
 import RuleManager from '@/components/rules/RuleManager.vue';
 import UploadModal from '@/components/modals/UploadModal.vue';
 import SettingsView from './SettingsView.vue';
-import ToolsView from './ToolsView.vue'; // <--- IMPORTADO AGORA
+import ToolsView from './ToolsView.vue';
 
 // --- ESTADO ---
 const { user } = useAuth();
@@ -25,66 +23,73 @@ const currentView = ref('dashboard');
 const selectedDocId = ref(null);
 const isUploadModalOpen = ref(false);
 
-const appId = 'default-autonomous-agent';
+// Tabelas do Supabase (Substitui os Paths do Firestore)
+const docsTable = ref('processos'); 
+const rulesTable = ref('regras');
 
-// Paths
-const docsPath = computed(() => user.value ? `artifacts/${appId}/users/${user.value.uid}/intelligent_platform_docs` : null);
-const rulesPath = computed(() => user.value ? `artifacts/${appId}/users/${user.value.uid}/rules` : null);
-
-// Dados (Reativos via Firestore)
-const { data: documents } = useFirestoreCollection(docsPath);
-const { data: rules } = useFirestoreCollection(rulesPath);
-
-// Seed inicial
-useSeeder(rulesPath);
+// Dados (Reativos via Supabase)
+const { data: documents } = useSupabaseCollection(docsTable);
+const { data: rules } = useSupabaseCollection(rulesTable);
 
 // --- AÇÕES ---
 
-// Validação Humana (Único momento que o cliente interfere no fluxo além do upload)
+// Validação Humana
 const onHumanValidation = async ({ docId, data }) => {
-    if(!docsPath.value) return;
-    const docRef = doc(db, docsPath.value, docId);
-    // Atualiza dados corrigidos e muda status para disparar o próximo gatilho no backend
-    await updateDoc(docRef, { 
-        idpResult: JSON.stringify(data), 
-        status: 'Raciocinio Pendente' // Gatilho para onProcessUpdated no backend
-    });
-    toastStore.addToast('Validado! Agente retomando análise...', 'success');
+    // Atualiza no Supabase
+    const { error } = await supabase
+        .from('processos')
+        .update({ 
+            resultado_ia: { ...data, validated: true }, // Ajuste conforme sua estrutura JSON
+            status: 'Raciocinio Pendente' 
+        })
+        .eq('id', docId);
+
+    if (error) {
+        toastStore.addToast('Erro ao validar: ' + error.message, 'error');
+    } else {
+        toastStore.addToast('Validado! Agente retomando análise...', 'success');
+    }
 };
 
 const handleManualAdvance = async ({ docId }) => {
-    if(!docsPath.value) return;
+    const { error } = await supabase
+        .from('processos')
+        .update({ status: 'Validacao Pendente' })
+        .eq('id', docId);
     
-    const docRef = doc(db, docsPath.value, docId);
-    
-    // Força o status para 'Validacao Pendente' para liberar a edição manual
-    await updateDoc(docRef, { 
-        status: 'Validacao Pendente'
-    });
-    
-    toastStore.addToast('Avançado para validação manual.', 'warning');
+    if (error) {
+        toastStore.addToast('Erro: ' + error.message, 'error');
+    } else {
+        toastStore.addToast('Avançado para validação manual.', 'warning');
+    }
 };
 
 const handleDelete = async (id) => {
     if(confirm("Tem certeza que deseja excluir este processo?")) {
-        await deleteDoc(doc(db, docsPath.value, id));
-        selectedDocId.value = null;
-        currentView.value = 'dashboard';
+        const { error } = await supabase
+            .from('processos')
+            .delete()
+            .eq('id', id);
+
+        if (!error) {
+            selectedDocId.value = null;
+            currentView.value = 'dashboard';
+            toastStore.addToast('Processo excluído.', 'success');
+        } else {
+            toastStore.addToast('Erro ao excluir.', 'error');
+        }
     }
 };
 
-// Função auxiliar para abrir upload de qualquer lugar
 const openUpload = () => { isUploadModalOpen.value = true; };
 </script>
 
 <template>
   <div class="flex flex-col h-screen font-sans overflow-hidden bg-gray-100 dark:bg-slate-950 text-slate-900 dark:text-white transition-colors duration-300">
-    <Header />
+    <Header/>
 
     <div class="flex-grow flex overflow-hidden">
-        <!-- Navegação Lateral Estilo "App" -->
         <aside class="w-24 border-r flex flex-col items-center py-6 space-y-4 shrink-0 z-30 bg-white border-slate-200 dark:bg-slate-900 dark:border-slate-800">
-            <!-- BOTÃO DE UPLOAD SEMPRE VISÍVEL -->
             <button @click="openUpload" class="flex flex-col items-center justify-center w-full py-3 px-1 text-indigo-500 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 transition-colors">
                 <PlusCircle class="w-7 h-7 mb-1" />
                 <span class="text-[10px] font-bold tracking-wide">NOVO</span>
@@ -92,19 +97,19 @@ const openUpload = () => { isUploadModalOpen.value = true; };
             <div class="w-full h-px bg-slate-200 dark:bg-slate-800"></div>
             
             <button @click="currentView = 'dashboard'" 
-                class="nav-btn" :class="currentView === 'dashboard' ? 'active' : ''">
+                    class="nav-btn" :class="currentView === 'dashboard' ? 'active' : ''">
                 <LayoutDashboard class="w-6 h-6 mb-1.5" />
                 <span class="text-[10px] font-medium tracking-wide">Dashboard</span>
             </button>
 
             <button @click="currentView = 'documents'" 
-                class="nav-btn" :class="currentView === 'documents' ? 'active' : ''">
+                    class="nav-btn" :class="currentView === 'documents' ? 'active' : ''">
                 <FileText class="w-6 h-6 mb-1.5" />
                 <span class="text-[10px] font-medium tracking-wide">Processos</span>
             </button>
 
             <button @click="currentView = 'rules'" 
-                class="nav-btn" :class="currentView === 'rules' ? 'active' : ''">
+                    class="nav-btn" :class="currentView === 'rules' ? 'active' : ''">
                 <Shield class="w-6 h-6 mb-1.5" />
                 <span class="text-[10px] font-medium tracking-wide">Regras</span>
             </button>
@@ -112,7 +117,7 @@ const openUpload = () => { isUploadModalOpen.value = true; };
             <div class="flex-grow"></div>
             
             <button @click="currentView = 'tools'" 
-                class="nav-btn" :class="currentView === 'tools' ? 'active' : ''">
+                    class="nav-btn" :class="currentView === 'tools' ? 'active' : ''">
                  <Wrench class="w-6 h-6 mb-1.5" />
                  <span class="text-[10px] font-medium tracking-wide">Ferramentas</span>
             </button>
@@ -124,10 +129,8 @@ const openUpload = () => { isUploadModalOpen.value = true; };
             </button>
         </aside>
 
-        <!-- Área Principal -->
         <div class="flex-grow flex overflow-hidden relative bg-gray-50 dark:bg-slate-950">
             
-            <!-- Views de Tela Cheia -->
             <div v-if="currentView === 'settings'" class="absolute inset-0 p-6 z-20">
                 <div class="h-full rounded-2xl shadow-2xl overflow-hidden bg-white border-slate-200 dark:bg-slate-800 dark:border-slate-700 border">
                     <SettingsView />
@@ -140,9 +143,7 @@ const openUpload = () => { isUploadModalOpen.value = true; };
                 </div>
             </div>
 
-            <!-- Layout Padrão (Sidebar + Main) -->
             <div v-if="['dashboard', 'documents', 'rules'].includes(currentView)" class="flex w-full h-full">
-                <!-- Lista de Documentos (Visível apenas em 'documents' ou desktop large se quiser) -->
                 <div v-show="currentView === 'documents'" class="w-80 min-w-[320px] border-r flex flex-col z-10 transition-all bg-white border-slate-200 dark:bg-slate-900 dark:border-slate-800">
                     <Sidebar 
                         :documents="documents" 
@@ -152,19 +153,15 @@ const openUpload = () => { isUploadModalOpen.value = true; };
                     />
                 </div>
 
-                <!-- Conteúdo Central -->
                 <main class="flex-grow overflow-hidden flex flex-col relative">
-                    <!-- Dashboard Overlay -->
                     <div v-if="currentView === 'dashboard'" class="absolute inset-0 p-6 overflow-y-auto custom-scrollbar">
                         <Dashboard :documents="documents" />
                     </div>
 
-                    <!-- Rule Manager Overlay -->
                     <div v-if="currentView === 'rules'" class="absolute inset-0 p-6 overflow-y-auto custom-scrollbar">
-                        <RuleManager :rules="rules" :rulesCollectionPath="rulesPath" />
+                        <RuleManager :rules="rules" rulesTable="regras" />
                     </div>
 
-                    <!-- Document Viewer -->
                     <div v-if="currentView === 'documents'" class="h-full flex flex-col bg-white dark:bg-slate-950">
                         <DocumentViewer 
                             :doc="documents?.find(d => d.id === selectedDocId)" 

@@ -16,8 +16,7 @@ const emit = defineEmits(['delete', 'validate', 'manual-advance']);
 const idpData = computed(() => safeParse(props.doc?.idpResult) || {});
 // Usa o raw se existir, senão usa o result atual como base para diff
 const originalData = computed(() => safeParse(props.doc?.idpResultRaw) || idpData.value); 
-const analiseData = computed(() => safeParse(props.doc?.rarResult)); // Corrigido para rarResult conforme backend
-const rhData = computed(() => safeParse(props.doc?.enrichedData));   // Corrigido para enrichedData
+const analiseData = computed(() => safeParse(props.doc?.rarResult));
 
 // --- LÓGICA DE EDIÇÃO ---
 const isEditing = ref(false);
@@ -112,13 +111,16 @@ const generateOfficialAct = async () => {
 
             <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="font-bold text-indigo-600 dark:text-indigo-400 flex items-center"><FileText class="w-4 h-4 mr-2"/> Dados Extraídos</h3>
-                    <button v-if="doc.status === 'Validacao Pendente' && !isEditing" @click="startValidation" class="text-xs bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-white transition">
-                        Validar Dados
+                    <h3 class="font-bold text-indigo-600 dark:text-indigo-400 flex items-center"><FileText class="w-4 h-4 mr-2"/> Dados do Requerimento</h3>
+                    <button v-if="doc.status === 'Validacao Pendente' && !isEditing" @click="startValidation" class="text-xs bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-white transition shadow-sm">
+                        Corrigir Dados
                     </button>
                 </div>
 
                 <div v-if="isEditing" class="space-y-3 animate-fade-in">
+                    <div class="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800 mb-4 text-xs text-blue-700 dark:text-blue-300">
+                        <strong>Sistema de Correção:</strong> Verifique se os dados extraídos conferem com o documento original ao lado. Corrija qualquer erro antes de enviar para análise.
+                    </div>
                     <div v-if="editForm.keyFields && Array.isArray(editForm.keyFields)">
                         <div v-for="(fieldObj, index) in editForm.keyFields" :key="index">
                             <label class="text-[10px] uppercase text-slate-500 font-bold">{{ fieldObj.field }}</label>
@@ -137,7 +139,7 @@ const generateOfficialAct = async () => {
                     </button>
                 </div>
 
-                <div v-else-if="idpData.keyFields && Array.isArray(idpData.keyFields)" class="grid grid-cols-2 gap-4">
+                <div v-else-if="idpData.keyFields" class="grid grid-cols-2 gap-4">
                     <div v-for="(item, idx) in idpData.keyFields" :key="idx">
                         <span class="block text-[10px] uppercase text-slate-500">{{ item.field }}</span>
                         <span class="text-sm font-medium">{{ item.value }}</span>
@@ -147,24 +149,6 @@ const generateOfficialAct = async () => {
                     <div v-for="(val, key) in idpData" :key="key">
                         <span class="block text-[10px] uppercase text-slate-500">{{ key }}</span>
                         <span class="text-sm font-medium">{{ val }}</span>
-                    </div>
-                </div>
-            </div>
-
-            <div v-if="rhData" class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 relative overflow-hidden shadow-sm">
-                <h3 class="font-bold text-purple-600 dark:text-purple-400 mb-4 flex items-center"><User class="w-4 h-4 mr-2"/> Ficha Funcional</h3>
-                <div class="grid grid-cols-2 gap-y-3 relative z-10">
-                    <div>
-                        <span class="block text-[10px] uppercase text-slate-500">Cargo</span>
-                        <span class="text-sm">{{ rhData.cargo }}</span>
-                    </div>
-                    <div>
-                        <span class="block text-[10px] uppercase text-slate-500">Categoria</span>
-                        <span class="text-sm">{{ rhData.categoria }}</span>
-                    </div>
-                    <div>
-                        <span class="block text-[10px] uppercase text-slate-500">Tempo de Serviço</span>
-                        <span class="text-sm">{{ rhData.tempo_servico_anos }} anos</span>
                     </div>
                 </div>
             </div>

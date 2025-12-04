@@ -17,14 +17,10 @@ import * as logger from "firebase-functions/logger";
 import {GoogleGenerativeAI} from "@google/generative-ai";
 import {initializeApp} from "firebase-admin/app";
 import {getFirestore, Firestore} from "firebase-admin/firestore";
-
 initializeApp();
 const db = getFirestore();
 
 // --- SEGREDOS ---
-const ergonUrl = defineSecret("ERGON_API_URL");
-const ergonUser = defineSecret("ERGON_USER");
-const ergonPass = defineSecret("ERGON_PASSWORD");
 const geminiKey = defineSecret("GEMINI_API_KEY");
 
 const MODEL_NAME = "gemini-1.5-flash";
@@ -53,83 +49,21 @@ async function logAudit(dbInstance: Firestore, data: any) {
 }
 
 /**
- * Simula recuperação de contexto jurídico (RAG).
+ * Recupera contexto jurídico específico para FÉRIAS.
  * @param {string} query Pergunta do usuário.
  * @return {Promise<string>} Contexto relevante.
  */
 async function retrieveLegalContext(query: string): Promise<string> {
-  const q = query.toLowerCase();
-  let context = "";
-
-  if (q.includes("férias") || q.includes("dias")) {
-    context += `
-    [LEI 5.810/94 - Art. 105] O servidor terá direito a 30 dias de férias.
-    [PCCR EDUCAÇÃO] Professor: 45 dias anuais (conforme calendário).
-    `;
-  }
-
-  if (q.includes("prêmio") || q.includes("licença")) {
-    context += `
-    [LEI 5.810/94] Após cada quinquênio, 3 meses de licença-prêmio.
-    `;
-  }
-
-  return context || "Nenhuma legislação específica encontrada.";
-}
-
-/**
- * Integração real com a API do Ergon.
- * @param {string} termoBusca Nome ou matrícula.
- * @return {Promise<any>} Dados do servidor ou objeto de erro.
- */
-async function realErgonIntegration(termoBusca: string): Promise<any> {
-  logger.info(`[ERGON] Buscando: ${termoBusca}`);
-  if (!termoBusca) return {erro: "Termo inválido"};
-
-  const url = ergonUrl.value();
-  const user = ergonUser.value();
-  const pass = ergonPass.value();
-  const auth = "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
-
-  try {
-    const response = await fetch(
-      `${url}/servidores?nome=${encodeURIComponent(termoBusca)}`,
-      {
-        method: "GET",
-        headers: {
-          "Authorization": auth,
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-        },
-      }
-    );
-
-    if (!response.ok) {
-      return {erro: `Erro HTTP Ergon: ${response.status}`};
-    }
-
-    const data = await response.json();
-
-    if (Array.isArray(data) && data.length > 0) {
-      const s = data[0];
-      const cargo = s.CARGO_DESCRICAO || "";
-      const isProf = cargo.toUpperCase().includes("PROFESSOR");
-
-      return {
-        nome: s.NOME_COMPLETO,
-        cargo: cargo,
-        categoria: s.CATEGORIA || (isProf ? "MAGISTERIO" : "ADMINISTRATIVO"),
-        matricula: s.MATRICULA,
-        tempo_servico_anos: s.TEMPO_SERVICO_ANOS || 0,
-        lotacao: s.LOTACAO_ATUAL,
-        status_funcional: s.SITUACAO_FUNCIONAL,
-      };
-    }
-    return {erro: "Servidor não encontrado."};
-  } catch (error) {
-    logger.error("[ERGON] Falha:", error);
-    return {erro: "Falha de conexão com RH."};
-  }
+  // Contexto fixo e especializado para o Analista de Férias
+  return `
+    [LEI 5.810/94 - RJU PA]
+    Art. 105: O servidor terá direito a 30 (trinta) dias consecutivos de férias por ano.
+    Art. 106: É proibida a acumulação de férias, salvo por imperiosa necessidade de serviço e no máximo por 2 períodos.
+    
+    [PCCR EDUCAÇÃO - Lei 7.442/10]
+    Art. 42: O ocupante do cargo de Professor fará jus a 45 (quarenta e cinco) dias de férias anuais.
+    §1º: O gozo das férias obedecerá ao calendário escolar.
+  `;
 }
 
 // --- TRIGGERS ---
@@ -159,8 +93,16 @@ export const onProcessCreated = onDocumentCreated(
       });
 
       const prompt = `
+      Você é um especialista em processar requerimentos de FÉRIAS.
       Analise o documento.
-      Extraia: Tipo, Nome, Matrícula, Cargo, Dias Solicitados.
+      Extraia estritamente:
+      - "Nome" (Nome completo do servidor)
+      - "Matrícula"
+      - "Cargo"
+      - "Dias" (Quantidade numérica de dias solicitados, ex: 30, 45)
+      - "Exercício" (Ano de referência, ex: 2024)
+      - "Inicio" (Data de início das férias)
+      
       Saída JSON: { keyFields: [{field, value}] }
       `;
 
@@ -173,7 +115,7 @@ export const onProcessCreated = onDocumentCreated(
 
       await snapshot.ref.update({
         idpResult: JSON.stringify(idpResult),
-        status: "Enriquecimento Pendente",
+        status: "Validacao Pendente",
       });
     } catch (error) {
       logger.error("Erro IDP:", error);
@@ -186,7 +128,7 @@ export const onProcessUpdated = onDocumentUpdated(
   {
     document:
       "artifacts/{appId}/users/{userId}/intelligent_platform_docs/{docId}",
-    secrets: [ergonUrl, ergonUser, ergonPass, geminiKey],
+    secrets: [geminiKey],
   },
   async (event) => {
     const newData = event.data?.after.data();
@@ -196,50 +138,40 @@ export const onProcessUpdated = onDocumentUpdated(
     const docRef = event.data?.after.ref;
     if (!docRef) return;
 
-    // A. Enriquecimento
-    if (newData.status === "Enriquecimento Pendente") {
-      const idpData = JSON.parse(newData.idpResult || "{}");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const findField = (k: string) => idpData.keyFields?.find(
-        (f: any) => f.field.includes(k)
-      )?.value;
-
-      const termo = findField("Matrícula") || findField("Nome") || "";
-      const dadosRH = await realErgonIntegration(termo);
-
-      await docRef.update({
-        enrichedData: JSON.stringify(dadosRH),
-        status: "Validacao Pendente",
-      });
-    }
-
-    // B. Raciocínio (Férias)
+    // Raciocínio (Férias)
+    // Este estágio ocorre APÓS o usuário validar/corrigir os dados na interface
     if (newData.status === "Raciocinio Pendente") {
       const idpData = JSON.parse(newData.idpResult || "{}");
-      const dadosRH = JSON.parse(newData.enrichedData || "{}");
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const findVal = (k: string) => idpData.keyFields?.find(
         (f: any) => f.field.includes(k)
       )?.value;
 
       const diasSolicitados = parseInt(findVal("Dias") || "0");
-      const userCategory = newData.userCategory ||
-                           dadosRH.categoria ||
-                           "ADMINISTRATIVO";
+      const nomeServidor = findVal("Nome") || "Não identificado";
 
-      // Regra Determinística
+      // Validação Determinística baseada na seleção do usuário no Upload
+      const userCategory = newData.userCategory || "ADMINISTRATIVO";
       const limite = userCategory === "MAGISTERIO" ? 45 : 30;
 
       const prompt = `
-      ATUE COMO ANALISTA DE RH.
-      Categoria: "${userCategory}". Limite Legal: ${limite} DIAS.
-      Pedido: ${diasSolicitados} dias.
+      ATUE COMO ANALISTA DE FÉRIAS DA SEDUC-PA.
       
-      REGRA:
-      - Se dias > ${limite}: REJEITAR.
-      - Se dias <= ${limite}: APROVAR (salvo outro impedimento).
+      DADOS DO PEDIDO (VALIDADOS):
+      - Servidor: ${nomeServidor}
+      - Categoria: ${userCategory}
+      - Dias Solicitados: ${diasSolicitados}
       
-      Saída JSON: { veredicto: { status, parecer }, chainOfThought }
+      REGRA RÍGIDA (LEI 5.810/94 e PCCR):
+      - O limite legal para ${userCategory} é de ${limite} DIAS.
+      
+      INSTRUÇÃO:
+      1. Verifique se ${diasSolicitados} <= ${limite}.
+      2. Se MAIOR, REJEITE. Motivo: "Excede o limite legal de ${limite} dias para o cargo."
+      3. Se MENOR ou IGUAL, APROVE. Motivo: "Dentro do limite legal."
+      
+      Saída JSON: { veredicto: { status: "Aprovado" | "Rejeitado", parecer: "string" }, chainOfThought: "string" }
       `;
 
       const genAI = getGenAIClient();
@@ -281,9 +213,9 @@ export const callGeminiAgent = onCall(
       const legalContext = await retrieveLegalContext(content);
 
       const augmentedPrompt = `
-      CONTEXTO JURÍDICO: ${legalContext}
-      PERGUNTA: ${content}
-      Responda com base na lei acima.
+      CONTEXTO DE FÉRIAS (LEGISLAÇÃO): ${legalContext}
+      DÚVIDA DO SERVIDOR: ${content}
+      Responda focando exclusivamente em regras de férias.
       `;
 
       const model = genAI.getGenerativeModel({model: MODEL_NAME});
@@ -308,7 +240,7 @@ export const generateDraft = onCall(
     const prompt = `
     Contexto: ${JSON.stringify(context)}
     Decisão: ${JSON.stringify(veredicto)}
-    Gere uma minuta de portaria formal.
+    Gere uma minuta de PORTARIA DE FÉRIAS formal para o Diário Oficial.
     `;
 
     const result = await model.generateContent(prompt);

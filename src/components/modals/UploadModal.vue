@@ -40,12 +40,16 @@ const handleStart = async () => {
             reader.onerror = (error) => reject(error);
         });
 
-        // 2. Chamar nossa nova API Serverless (Backend no Vercel)
-        const apiResponse = await fetch('/api/process-vacation', {
+        // 2. Chamar a API Serverless correspondente ao processo selecionado
+        // O ID do processo (ex: 'solicitacao_ferias') é convertido para o nome do arquivo da API (ex: 'process-vacation')
+        const apiEndpoint = `/api/${selectedProcessId.value.replace(/_/g, '-')}`;
+
+        const apiResponse = await fetch(apiEndpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                fileBase64: base64String,
+                fileBase64: base64String, 
+                mimeType: selectedFile.value.type,
                 userCategory: userCategory.value
             })
         });

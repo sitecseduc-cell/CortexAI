@@ -2,18 +2,18 @@
 import { ref, computed, watch } from 'vue';
 import { safeParse } from '@/utils/helpers';
 import VuePdfEmbed from 'vue-pdf-embed';
-import { CheckCircle, XCircle, AlertTriangle, User, FileText, Save, Loader2, FileSignature } from 'lucide-vue-next';
-// import { doc, updateDoc } from 'firebase/firestore'; // REMOVER
-// import { db, auth } from '@/libs/firebase'; // REMOVER - Substituir por Supabase auth
-import { geminiApiService } from '@/services/geminiService'; // Adicionado se faltar
+import { CheckCircle, FileText, Loader2, FileSignature } from 'lucide-vue-next';
+import { supabase } from '@/libs/supabase';
+import { useAuth } from '@/composables/useAuth';
+import { geminiApiService } from '@/services/geminiService';
 import { useTypewriter } from '@/composables/useTypewriter';
 
 const props = defineProps(['doc']);
-const emit = defineEmits(['delete', 'validate', 'manual-advance']); // Adicionado emits usados no template
+const emit = defineEmits(['delete', 'validate', 'manual-advance', 'process-updated']);
 
 // Dados
-const idpData = computed(() => safeParse(props.doc?.idpResult) || {});
-const analiseData = computed(() => safeParse(props.doc?.rarResult));
+const idpData = computed(() => props.doc?.resultado_ia?.keyFields || []);
+const analiseData = computed(() => props.doc?.resultado_ia);
 
 // --- LÓGICA DE EDIÇÃO ---
 const isEditing = ref(false);
@@ -27,16 +27,38 @@ watch(() => props.doc, (newDoc) => {
 }, { immediate: true });
 
 const startValidation = () => {
-    editForm.value = { ...idpData.value }; // Clona para edição
+    // Clona profundamente para evitar mutação direta do prop
+    editForm.value = JSON.parse(JSON.stringify(idpData.value));
     isEditing.value = true;
 };
 
+const { user } = useAuth();
+
 const confirmValidation = async () => {
-    // TODO: Substituir auth.currentUser pela verificação de usuário do Supabase
-    if(!props.doc.id /* || !supabase.auth.user() */) return;
+    if (!props.doc.id || !user.value) {
+        alert("Documento ou usuário inválido.");
+        return;
+    }
+
+    // Prepara o novo objeto `resultado_ia` com os dados editados
+    const updatedIaResult = {
+        ...props.doc.resultado_ia,
+        keyFields: editForm.value
+    };
     
-    // Emite o evento para o pai (PlatformView) lidar com a atualização
-    emit('validate', { docId: props.doc.id, data: editForm.value });
+    const { error } = await supabase
+        .from('processos')
+        .update({ 
+            resultado_ia: updatedIaResult,
+            status: 'Raciocinio Pendente' // Gatilho para a próxima etapa (se houver)
+        })
+        .eq('id', props.doc.id);
+
+    if (error) {
+        alert("Erro ao salvar validação: " + error.message);
+    } else {
+        emit('process-updated'); // Notifica o componente pai para recarregar a lista
+    }
     isEditing.value = false;
 };
 
@@ -50,9 +72,8 @@ const generateOfficialAct = async () => {
     isGeneratingPortaria.value = true;
     try {
         const processContext = {
-            // Proteção extra aqui no .find
-            nome: idpData.value?.keyFields?.find(f => f.field?.includes('Nome'))?.value || "Interessado",
-            documento: props.doc.name,
+            nome: idpData.value?.find(f => f.field?.includes('Nome'))?.value || "Interessado",
+            documento: props.doc.nome_arquivo,
             decisao: analiseData.value
         };
         
@@ -72,8 +93,8 @@ const generateOfficialAct = async () => {
   <div v-if="doc" class="flex h-full bg-slate-950 text-white">
     
     <div class="w-1/2 border-r border-slate-800 bg-slate-900/50 p-6 overflow-y-auto custom-scrollbar flex flex-col items-center">
-       <div v-if="doc.fileUrl">
-           <VuePdfEmbed :source="doc.fileUrl" class="shadow-xl border border-slate-700 rounded w-full max-w-[500px]" />
+       <div v-if="doc.url_arquivo">
+           <VuePdfEmbed :source="doc.url_arquivo" class="shadow-xl border border-slate-700 rounded w-full max-w-[500px]" />
        </div>
        <div v-else class="text-slate-500 mt-20 flex flex-col items-center">
            <FileText class="w-16 h-16 mb-4 opacity-50"/>
@@ -84,7 +105,7 @@ const generateOfficialAct = async () => {
     <div class="w-1/2 flex flex-col h-full overflow-hidden">
         
         <div class="p-6 border-b border-slate-800">
-            <h1 class="text-2xl font-bold mb-1">{{ doc.name }}</h1>
+            <h1 class="text-2xl font-bold mb-1">{{ doc.nome_arquivo }}</h1>
             <div class="flex items-center gap-2">
                 <span class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider"
                       :class="{
@@ -95,7 +116,7 @@ const generateOfficialAct = async () => {
                       }">
                     {{ doc?.status || 'Processando...' }}
                 </span>
-                <span class="text-slate-500 text-xs">{{ doc?.timestamp ? new Date(doc.timestamp).toLocaleDateString() : '...' }}</span>
+                <span class="text-slate-500 text-xs">{{ doc?.created_at ? new Date(doc.created_at).toLocaleDateString() : '...' }}</span>
             </div>
         </div>
 
@@ -110,18 +131,10 @@ const generateOfficialAct = async () => {
                 </div>
 
                 <div v-if="isEditing" class="space-y-3 animate-fade-in">
-                    <template v-if="editForm.keyFields && Array.isArray(editForm.keyFields)">
-                        <div v-for="(fieldObj, index) in editForm.keyFields" :key="index">
-                            <label class="text-[10px] uppercase text-slate-500 font-bold">{{ fieldObj.field }}</label>
-                            <input v-model="fieldObj.value" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm text-white focus:border-indigo-500 outline-none" />
-                        </div>
-                    </template>
-                    <template v-else>
-                         <div v-for="(val, key) in editForm" :key="key">
-                            <label class="text-[10px] uppercase text-slate-500 font-bold">{{ key }}</label>
-                            <input v-model="editForm[key]" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm text-white focus:border-indigo-500 outline-none" />
-                        </div>
-                    </template>
+                    <div v-for="(fieldObj, index) in editForm" :key="index">
+                        <label class="text-[10px] uppercase text-slate-500 font-bold">{{ fieldObj.field }}</label>
+                        <input v-model="fieldObj.value" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm text-white focus:border-indigo-500 outline-none" />
+                    </div>
 
                     <button @click="confirmValidation" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded mt-2 flex items-center justify-center">
                         <CheckCircle class="w-4 h-4 mr-2"/> Confirmar e Analisar
@@ -129,18 +142,10 @@ const generateOfficialAct = async () => {
                 </div>
 
                 <div v-else class="grid grid-cols-2 gap-4">
-                    <template v-if="idpData.keyFields && Array.isArray(idpData.keyFields)">
-                        <div v-for="(item, idx) in idpData.keyFields" :key="idx">
-                            <span class="block text-[10px] uppercase text-slate-500">{{ item.field }}</span>
-                            <span class="text-sm font-medium">{{ item.value }}</span>
-                        </div>
-                    </template>
-                    <template v-else>
-                        <div v-for="(val, key) in idpData" :key="key">
-                            <span class="block text-[10px] uppercase text-slate-500">{{ key }}</span>
-                            <span class="text-sm font-medium">{{ val }}</span>
-                        </div>
-                    </template>
+                    <div v-for="(item, idx) in idpData" :key="idx">
+                        <span class="block text-[10px] uppercase text-slate-500">{{ item.field }}</span>
+                        <span class="text-sm font-medium">{{ item.value || '---' }}</span>
+                    </div>
                 </div>
             </div>
 

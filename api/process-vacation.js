@@ -24,13 +24,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { fileBase64, userCategory } = req.body;
+    const { fileBase64, userCategory, mimeType } = await req.json(); // Use req.json() para Edge runtime
     
     // A chave deve estar configurada nas variáveis de ambiente da Vercel
     const apiKey = process.env.GEMINI_API_KEY; 
     
     if (!apiKey) {
         return res.status(500).json({ error: "Chave API não configurada no servidor." });
+    }
+    if (!fileBase64 || !userCategory || !mimeType) {
+        return res.status(400).json({ error: "Dados incompletos: fileBase64, userCategory e mimeType são obrigatórios." });
     }
 
     // 2. Lógica Determinística (A mesma que criamos antes)
@@ -69,7 +72,7 @@ export default async function handler(req, res) {
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const result = await model.generateContent([
-      { inlineData: { mimeType: "application/pdf", data: fileBase64 } },
+      { inlineData: { mimeType: mimeType, data: fileBase64 } },
       { text: prompt }
     ]);
 

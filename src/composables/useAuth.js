@@ -1,28 +1,29 @@
 import { ref, onMounted, onUnmounted } from 'vue';
-import { auth } from '@/libs/firebase';
-import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
+import { supabase } from '@/libs/supabase';
 
+// A single user ref to be shared across the application
 const user = ref(null);
-const isAuthReady = ref(false);
 
 export function useAuth() {
-  onMounted(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        user.value = currentUser;
-      } else {
-        // Login anônimo automático conforme regra do original 
-        try {
-            await signInAnonymously(auth);
-        } catch (e) {
-            console.error("Erro auth anonimo", e);
-        }
-      }
-      isAuthReady.value = true;
-    });
+  // The auth listener subscription
+  let authListener = null;
 
-    onUnmounted(() => unsubscribe());
+  // Function to handle auth state changes
+  const handleAuthStateChange = (_event, session) => {
+    user.value = session?.user ?? null;
+  };
+
+  onMounted(() => {
+    // Listen for changes to the auth state
+    const { data: listener } = supabase.auth.onAuthStateChange(handleAuthStateChange);
+    authListener = listener;
   });
 
-  return { user, isAuthReady };
+  onUnmounted(() => {
+    // Stop listening for auth changes when the component is unmounted
+    authListener?.subscription?.unsubscribe();
+  });
+
+  // Return the reactive user object
+  return { user };
 }

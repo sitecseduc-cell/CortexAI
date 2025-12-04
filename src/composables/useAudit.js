@@ -14,48 +14,49 @@ export function useAudit() {
 
   const logAction = async (docId, action, details = {}) => {
     try {
-      const actorInfo = user.value 
-        ? { uid: user.value.id, email: user.value.email }
-        : { uid: 'system', email: 'automacao@cortex.gov' };
+      const actorId = user.value ? user.value.id : 'system';
 
       // 1. Buscar o Hash do último bloco (log)
-      const { data: lastLogs } = await supabase
-        .from('audit_trail')
+      const { data: lastLog } = await supabase
+        .from('audit_logs')
         .select('current_hash')
         .eq('doc_id', docId)
         .order('created_at', { ascending: false })
-        .limit(1);
+        .limit(1)
+        .single();
 
       let previousHash = 'GENESIS_BLOCK_HASH_000000000000000000';
 
-      if (lastLogs && lastLogs.length > 0) {
-        previousHash = lastLogs[0].current_hash;
+      if (lastLog) {
+        previousHash = lastLog.current_hash;
       }
 
       // 2. Preparar payload
       const timestamp = new Date().toISOString();
-      const payload = {
+      const payloadString = JSON.stringify({
         action,
-        doc_id: docId,
-        actor: actorInfo.uid,
-        details: JSON.stringify(details),
-        previous_hash: previousHash,
+        docId,
+        actor: actorId,
+        details,
+        previousHash,
         timestamp
-      };
+      });
 
       // 3. Gerar Hash
-      const payloadString = JSON.stringify(payload);
       const currentHash = await generateHash(payloadString);
 
       // 4. Salvar no Supabase
-      const { error } = await supabase.from('audit_trail').insert({
-        action,
-        doc_id: docId,
-        actor: actorInfo, 
-        details,          
-        current_hash: currentHash,      
-        previous_hash: previousHash
-      });
+      const { error } = await supabase
+        .from('audit_logs')
+        .insert([{
+            doc_id: docId,
+            action,
+            actor_id: actorId,
+            details: details, // Coluna JSONB
+            previous_hash: previousHash,
+            current_hash: currentHash,
+            // created_at é gerado automaticamente pelo banco
+        }]);
 
       if (error) throw error;
 

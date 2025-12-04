@@ -3,57 +3,47 @@ import { supabase } from '@/libs/supabase';
 
 /**
  * Hook para buscar dados de uma tabela do Supabase com suporte a Realtime.
- * @param {import('vue').Ref<string>} tableNameRef - Ref contendo o nome da tabela (ex: 'processos')
- * @param {Object} queryOptions - Opções de filtro (opcional)
+ * @param {string} tableName - O nome da tabela.
+ * @param {Function} filterFn - Uma função opcional para aplicar filtros à query.
  */
-export function useSupabaseCollection(tableNameRef, queryOptions = {}) {
+export function useSupabaseCollection(tableName, filterFn = null) {
   const data = ref([]);
   const loading = ref(true);
   const error = ref(null);
 
   watchEffect(async (onInvalidate) => {
-    if (!tableNameRef.value) {
-        loading.value = false;
-        return;
-    }
-
     loading.value = true;
-    const table = tableNameRef.value;
+    error.value = null;
 
     // 1. Busca Inicial
-    const fetchData = async () => {
-      try {
-        let query = supabase.from(table).select('*').order('created_at', { ascending: false });
-        
-        // Aplica filtros simples se houver (ex: user_id)
-        if (queryOptions.userId) {
-            query = query.eq('user_id', queryOptions.userId);
-        }
+    let query = supabase.from(tableName).select('*').order('created_at', { ascending: false });
+    
+    // Aplica filtros se fornecidos (ex: filtrar por usuário)
+    if (filterFn) {
+        query = filterFn(query);
+    }
 
-        const { data: result, error: err } = await query;
-        if (err) throw err;
-        data.value = result;
-      } catch (err) {
-        error.value = err;
-        console.error(`Erro ao buscar ${table}:`, err);
-      } finally {
-        loading.value = false;
-      }
-    };
+    const { data: result, error: err } = await query;
 
-    await fetchData();
+    if (err) {
+      console.error(`Erro ao buscar ${tableName}:`, err);
+      error.value = err;
+    } else {
+      data.value = result || [];
+    }
+    loading.value = false;
 
     // 2. Inscrição em Realtime (Ouve Insert/Update/Delete)
     const channel = supabase
-      .channel(`public:${table}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: table }, (payload) => {
+      .channel(`public:${tableName}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, (payload) => {
         if (payload.eventType === 'INSERT') {
           data.value.unshift(payload.new);
+        } else if (payload.eventType === 'DELETE') {
+          data.value = data.value.filter(item => item.id !== payload.old.id);
         } else if (payload.eventType === 'UPDATE') {
           const index = data.value.findIndex(item => item.id === payload.new.id);
           if (index !== -1) data.value[index] = payload.new;
-        } else if (payload.eventType === 'DELETE') {
-          data.value = data.value.filter(item => item.id !== payload.old.id);
         }
       })
       .subscribe();

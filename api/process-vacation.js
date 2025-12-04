@@ -1,4 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { createClient } from '@supabase/supabase-js';
+import { executeRAR } from './_lib/ruleEngine.js'; // Caminho corrigido para a função serverless
 
 // Configuração para Vercel Serverless
 export const config = {
@@ -26,62 +28,61 @@ export default async function handler(req, res) {
   try {
     const { fileBase64, userCategory, mimeType } = await req.json(); // Use req.json() para Edge runtime
     
-    // A chave deve estar configurada nas variáveis de ambiente da Vercel
     const apiKey = process.env.GEMINI_API_KEY; 
+    const supabaseUrl = process.env.VITE_SUPABASE_URL;
+    const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
     
-    if (!apiKey) {
-        return res.status(500).json({ error: "Chave API não configurada no servidor." });
+    if (!apiKey || !supabaseUrl || !supabaseKey) {
+        return res.status(500).json({ error: "Variáveis de ambiente não configuradas no servidor." });
     }
     if (!fileBase64 || !userCategory || !mimeType) {
         return res.status(400).json({ error: "Dados incompletos: fileBase64, userCategory e mimeType são obrigatórios." });
     }
 
-    // 2. Lógica Determinística (A mesma que criamos antes)
-    const limite = userCategory === 'MAGISTERIO' ? 45 : 30;
-
-    // 3. Prompt do Especialista
+    // 2. Prompt do Especialista para EXTRAÇÃO DE DADOS (IDP)
     const prompt = `
-      ATUE COMO ANALISTA DE FÉRIAS DA SEDUC-PA.
-      
-      DADOS:
-      - Categoria: ${userCategory}
-      - Limite Legal: ${limite} DIAS
+      ATUE COMO UM ASSISTENTE DE OCR.
+      Sua única tarefa é extrair os campos-chave do documento fornecido.
       
       TAREFA:
       Analise o documento (OCR). Extraia: Nome, Matrícula, Cargo, Dias Solicitados.
-      
-      REGRA:
-      - Se "Dias Solicitados" > ${limite} -> REJEITAR.
-      - Se "Dias Solicitados" <= ${limite} -> APROVAR.
-      
       Retorne estritamente JSON:
       {
         "keyFields": [
-            {"field": "Nome", "value": "..."},
-            {"field": "Dias", "value": "..."}
-        ],
-        "veredicto": {
-            "status": "Aprovado" ou "Rejeitado",
-            "parecer": "Texto curto justificando com base no limite de ${limite} dias."
-        }
+            {"field": "Nome", "value": "EXTRAIA_O_NOME_COMPLETO"},
+            {"field": "Matrícula", "value": "EXTRAIA_A_MATRICULA"},
+            {"field": "Cargo", "value": "EXTRAIA_O_CARGO"},
+            {"field": "Dias", "value": "EXTRAIA_A_QUANTIDADE_DE_DIAS_SOLICITADOS"}
+        ]
       }
     `;
 
-    // 4. Chamada ao Gemini
+    // 3. Chamada ao Gemini para IDP
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    const result = await model.generateContent([
+    const idpResult = await model.generateContent([
       { inlineData: { mimeType: mimeType, data: fileBase64 } },
       { text: prompt }
     ]);
 
-    const responseText = result.response.text();
+    const idpResponseText = idpResult.response.text();
+    const idpJsonStr = idpResponseText.replace(/```json|```/g, "").trim();
+    const idpData = JSON.parse(idpJsonStr);
+    idpData.categoria_usuario = userCategory; // Adiciona a categoria para o motor de regras
+
+    // 4. Buscar Regras do Supabase
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    const { data: rules, error: rulesError } = await supabase.from('regras').select('*');
+    if (rulesError) throw rulesError;
+
+    // 5. Executar Motor de Regras (RAR)
+    const veredicto = executeRAR(idpData, rules);
+
+    // 6. Montar Resposta Final
+    const finalResponse = { ...idpData, veredicto };
     
-    // Limpeza de Markdown json se houver
-    const jsonStr = responseText.replace(/```json|```/g, "").trim();
-    
-    return res.status(200).json(JSON.parse(jsonStr));
+    return res.status(200).json(finalResponse);
 
   } catch (error) {
     console.error(error);

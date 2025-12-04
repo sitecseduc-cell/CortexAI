@@ -3,40 +3,38 @@
 // Serviço simplificado para chamar suas rotas de API (ex: Vercel Functions ou API local)
 export const geminiApiService = {
   
-  /**
-   * Chama uma rota de API para processar texto ou gerar conteúdo
-   */
-  async callGeminiAPI(prompt, systemInstruction) {
+  // Função genérica para chamar suas APIs Serverless
+  async callEndpoint(endpoint, body) {
     try {
-      const response = await fetch('/api/gemini-generic', { // Você precisará criar esta rota ou adaptar
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, systemInstruction })
-      });
-
-      if (!response.ok) throw new Error('Falha na requisição AI');
-      return await response.json();
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
+        return await response.json();
     } catch (error) {
-      console.error("Erro no serviço Gemini:", error);
-      // Retorna fallback para não quebrar a UI
-      return { text: "Erro ao processar solicitação de IA." };
+        console.error("Gemini Service Error:", error);
+        throw error;
     }
   },
 
-  // Gera a minuta chamando uma API específica
+  async callGeminiAPI(content, systemInstruction, schema) {
+    // Você precisa criar um endpoint genérico ou específico para isso em /api/
+    // Exemplo: /api/gemini-generic
+    return this.callEndpoint('/api/gemini-generic', { 
+        content, 
+        systemInstruction, 
+        schema 
+    });
+  },
+
   async generateDraft(context, veredict) {
-    try {
-      const response = await fetch('/api/generate-draft', { // Crie esta rota similar a api/process-vacation
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context, veredict })
-      });
-      
-      const data = await response.json();
-      return data.response || data;
-    } catch (error) {
-      console.error("Erro ao gerar minuta:", error);
-      return "Erro ao gerar o documento. Tente novamente.";
-    }
+    // Supondo que você crie um arquivo api/generate-draft.js
+    const result = await this.callEndpoint('/api/generate-draft', {
+        context,
+        veredict
+    });
+    return result.response || result;
   }
 };

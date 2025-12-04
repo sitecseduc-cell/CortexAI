@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { useSupabaseCollection } from '@/composables/useSupabase'; // Alterado
+import { useSupabaseCollection } from '@/composables/useFirestore'; // Corrigido para o nome de arquivo existente
 import { useAuth } from '@/composables/useAuth';
 import Sidebar from '@/components/layout/Sidebar.vue';
 
@@ -13,8 +13,7 @@ const route = useRoute();
 const selectedDocId = computed(() => route.params.id || null);
 
 // Busca os documentos do Supabase
-const docsTable = ref('processos'); // Nome da tabela
-const { data: documents } = useSupabaseCollection(docsTable);
+const { data: documents } = useSupabaseCollection('processos');
 
 const handleSelect = (docId) => {
   // Navega para a rota de detalhe do processo

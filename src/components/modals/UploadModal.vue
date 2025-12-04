@@ -1,13 +1,12 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { X, Zap, UploadCloud, FileText, CheckCircle, Loader2 } from 'lucide-vue-next';
-import { supabase } from '@/libs/supabase'; // Importe o novo cliente
-// Importa a lista completa de processos que criamos
 import { PROCESSOS_CCM } from '@/constants/processes';
+import { useDocumentWorkflow } from '@/composables/useDocumentWorkflow';
 
 const emit = defineEmits(['close']);
-const isUploading = ref(false);
-// Adicione um ref para a categoria
+const { isProcessing, startNewProcess } = useDocumentWorkflow();
+
 const userCategory = ref('ADMINISTRATIVO'); // Valor padrão seguro
 const selectedProcessId = ref('solicitacao_ferias'); // Define um padrão válido da nova lista
 const selectedFile = ref(null);
@@ -27,75 +26,13 @@ const handleDrop = (event) => {
 };
 
 const handleStart = async () => {
-    if (!selectedFile.value) return;
-    isUploading.value = true;
-
-    try {
-        // 1. Converter Arquivo para Base64 (Para enviar ao Gemini)
-        // Promisify FileReader to work well with async/await
-        const base64String = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(selectedFile.value);
-            reader.onload = () => resolve(reader.result.split(',')[1]); // Remove header
-            reader.onerror = (error) => reject(error);
-        });
-
-        // 2. Chamar a API Serverless correspondente ao processo selecionado
-        // O ID do processo (ex: 'solicitacao_ferias') é convertido para o nome do arquivo da API (ex: 'process-vacation')
-        const apiEndpoint = `/api/${selectedProcessId.value.replace(/_/g, '-')}`;
-
-        const apiResponse = await fetch(apiEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                fileBase64: base64String, 
-                mimeType: selectedFile.value.type,
-                userCategory: userCategory.value
-            })
-        });
-
-        if (!apiResponse.ok) {
-            const errorBody = await apiResponse.text();
-            throw new Error(`Falha na análise da IA: ${errorBody}`);
-        }
-        const resultadoIA = await apiResponse.json();
-
-        // 3. Salvar no Supabase (Banco de Dados)
-        // Upload do arquivo para o Storage do Supabase (Bucket "documentos")
-        const fileName = `${Date.now()}_${selectedFile.value.name}`;
-        const { data: fileData, error: uploadError } = await supabase
-            .storage
-            .from('documentos')
-            .upload(fileName, selectedFile.value);
-
-        if (uploadError) throw uploadError;
-
-        // Obter URL pública
-        const { data: { publicUrl } } = supabase
-            .storage
-            .from('documentos')
-            .getPublicUrl(fileName);
-
-        // Inserir registro na tabela "processos"
-        const { error: dbError } = await supabase
-            .from('processos')
-            .insert([{
-                nome_arquivo: selectedFile.value.name,
-                url_arquivo: publicUrl,
-                status: resultadoIA.veredicto.status, // Já vem pronto da IA!
-                resultado_ia: resultadoIA, // JSON completo
-                categoria_usuario: userCategory.value,
-            }]);
-
-        if (dbError) throw dbError;
-
-        emit('close');
-
-    } catch (error) {
-        console.error("Erro no processamento:", error);
-        alert("Erro ao processar: " + error.message);
-    } finally {
-        isUploading.value = false;
+    const success = await startNewProcess(
+        selectedFile.value, 
+        selectedProcessId.value, 
+        userCategory.value
+    );
+    if (success) {
+      emit('close');
     }
 };
 
@@ -186,11 +123,11 @@ const currentProcessDescription = computed(() => {
       
       <button 
         @click="handleStart" 
-        :disabled="isUploading" 
+        :disabled="isProcessing" 
         class="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
       >
-        <Loader2 v-if="isUploading" class="w-5 h-5 mr-2 animate-spin" />
-        {{ isUploading ? 'Enviando e Analisando...' : 'Iniciar Análise IA' }}
+        <Loader2 v-if="isProcessing" class="w-5 h-5 mr-2 animate-spin" />
+        {{ isProcessing ? 'Enviando e Analisando...' : 'Iniciar Análise IA' }}
       </button>
     </div>
   </div>

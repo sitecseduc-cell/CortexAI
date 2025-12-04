@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useAuth } from '@/composables/useAuth';
-import { useSupabaseCollection } from '@/composables/useSupabase'; // <-- Mudança aqui
+import { useSupabaseCollection } from '@/composables/useFirestore'; // Corrigido para o nome de arquivo existente
 import { supabase } from '@/libs/supabase'; 
 import { useToastStore } from '@/stores/toast';
 
@@ -23,13 +23,11 @@ const currentView = ref('dashboard');
 const selectedDocId = ref(null);
 const isUploadModalOpen = ref(false);
 
-// Tabelas do Supabase (Substitui os Paths do Firestore)
-const docsTable = ref('processos'); 
-const rulesTable = ref('regras');
-
-// Dados (Reativos via Supabase)
-const { data: documents } = useSupabaseCollection(docsTable);
-const { data: rules } = useSupabaseCollection(rulesTable);
+// Em vez de Paths complexos, usamos nomes de tabelas
+// O Supabase usa RLS (Row Level Security) para filtrar por usuário no backend, 
+// mas podemos filtrar aqui também se necessário.
+const { data: documents } = useSupabaseCollection('processos'); 
+const { data: rules } = useSupabaseCollection('regras');
 
 // --- AÇÕES ---
 
@@ -39,8 +37,8 @@ const onHumanValidation = async ({ docId, data }) => {
     const { error } = await supabase
         .from('processos')
         .update({ 
-            resultado_ia: { ...data, validated: true }, // Ajuste conforme sua estrutura JSON
-            status: 'Raciocinio Pendente' 
+            resultado_ia: { ...data }, // Garanta que isso corresponda à estrutura da sua coluna JSONB
+            status: 'Raciocinio Pendente'
         })
         .eq('id', docId);
 
@@ -58,7 +56,7 @@ const handleManualAdvance = async ({ docId }) => {
         .eq('id', docId);
     
     if (error) {
-        toastStore.addToast('Erro: ' + error.message, 'error');
+        toastStore.addToast('Erro ao atualizar.', 'error');
     } else {
         toastStore.addToast('Avançado para validação manual.', 'warning');
     }
@@ -71,12 +69,12 @@ const handleDelete = async (id) => {
             .delete()
             .eq('id', id);
 
-        if (!error) {
+        if (error) {
+            toastStore.addToast('Erro ao excluir: ' + error.message, 'error');
+        } else {
             selectedDocId.value = null;
             currentView.value = 'dashboard';
             toastStore.addToast('Processo excluído.', 'success');
-        } else {
-            toastStore.addToast('Erro ao excluir.', 'error');
         }
     }
 };

@@ -2,57 +2,59 @@
  * Executa o motor de regras (RAR - Rules as Reasoning) sobre os dados extraídos.
  * @param {object} idpData - O objeto com os dados extraídos pela IA (resultado_ia).
  * @param {Array} rules - A lista de regras de negócio vindas do banco de dados.
- * @returns {object} - Um objeto contendo o veredito final e o parecer.
+ * @returns {Array} - Uma lista de resultados da aplicação das regras.
  */
-export function executeRAR(idpData, rules) {
-  if (!idpData || !rules) {
-    return {
-      status: 'FALHA',
-      parecer: 'Dados de entrada ou regras ausentes para a análise.'
-    };
-  }
-
-  // Helper para buscar campos extraídos pela IA de forma segura.
-  const getField = (fieldName) => {
-    const field = idpData.keyFields?.find(f => f.field.toLowerCase().includes(fieldName.toLowerCase()));
-    return field?.value || null;
-  };
-
-  // Coleta os fatos a partir dos dados da IA.
-  const fatos = {
-    dias_solicitados: parseInt(getField('dias'), 10) || 0,
-    categoria_usuario: idpData.categoria_usuario || 'ADMINISTRATIVO',
-    // Adicione outros fatos conforme necessário (ex: tempo_servico, cargo, etc.)
-  };
-
-  let parecerFinal = 'Análise concluída sem objeções.';
-  let statusFinal = 'Aprovado';
-
-  // Itera sobre as regras ativas.
-  rules.filter(r => r.status === 'Ativa').forEach(rule => {
-    // Verifica se TODAS as condições da regra são verdadeiras.
-    const isRuleTriggered = rule.condicoes.every(cond => {
-      const fatoValor = fatos[cond.fato];
-      if (fatoValor === undefined) return false; // Fato não encontrado, condição não pode ser atendida.
-
-      switch (cond.operador) {
-        case '>': return fatoValor > cond.valor;
-        case '<': return fatoValor < cond.valor;
-        case '>=': return fatoValor >= cond.valor;
-        case '<=': return fatoValor <= cond.valor;
-        case '==': return fatoValor == cond.valor;
-        case '!=': return fatoValor != cond.valor;
-        case 'contém': return String(fatoValor).includes(cond.valor);
-        default: return false;
+export const executeRAR = (idpData, rules) => {
+    if (!idpData || !rules) return [];
+ 
+    // Helper para buscar valor extraído
+    const getField = (name) => idpData.keyFields?.find(f => f.field.toUpperCase().includes(name))?.value || '';
+    
+    const cargo = getField('CARGO');
+    const matricula = getField('MATRICULA');
+    const dataInicio = getField('DATA_INICIO');
+    const diasGozo = parseInt(getField('DIAS_GOZO')) || 0;
+  
+    const results = [];
+  
+    rules.forEach(rule => {
+      if (rule.status !== 'Ativa') return;
+  
+      let status = "SUCESSO";
+      let triggerValue = "N/A";
+      let action = "Deferido";
+  
+      // Lógica de mapeamento das regras (Hardcoded logic mapping to dynamic rules)
+      // Idealmente, as regras no banco teriam um campo 'codigo_logica' para mapear aqui
+      if (rule.nome.includes('Professor') && cargo.toLowerCase().includes('professor')) {
+          // Exemplo simples de validação de mês
+          if (dataInicio && !dataInicio.includes('/01/') && !dataInicio.includes('/07/')) {
+               status = "ALERTA";
+               triggerValue = dataInicio;
+               action = rule.acao;
+          }
       }
+      
+      if (rule.nome.includes('Limite') && diasGozo > 30) {
+          status = "FALHA";
+          triggerValue = `${diasGozo} dias`;
+          action = rule.acao;
+      }
+  
+      if (rule.nome.includes('Matrícula') && (!matricula || matricula.length < 3)) {
+          status = "FALHA";
+          triggerValue = "Vazio";
+          action = rule.acao;
+      }
+  
+      results.push({ rule: rule.nome, status, action, triggerValue });
     });
-
-    // Se a regra foi acionada, aplica a ação.
-    if (isRuleTriggered) {
-      statusFinal = rule.acao_se_verdadeiro.status;
-      parecerFinal = rule.acao_se_verdadeiro.mensagem;
-    }
-  });
-
-  return { status: statusFinal, parecer: parecerFinal };
-}
+  
+    return results;
+  };
+  
+  export const determineVerdict = (rarResults) => {
+    if (rarResults.some(r => r.status === 'FALHA')) return 'Failed';
+    if (rarResults.some(r => r.status === 'ALERTA')) return 'Requires Review';
+    return 'Completed'; // Deferido
+  };

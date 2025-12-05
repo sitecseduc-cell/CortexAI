@@ -1,61 +1,71 @@
-// src/services/geminiService.js
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// REMOVIDOS IMPORTS DO FIREBASE FUNCTIONS
+// Inicializa o cliente do Gemini
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+const genAI = new GoogleGenerativeAI(API_KEY);
 
-// --- Constantes de Prompt (System Instructions) ---
-const ML_IDP_SYSTEM_INSTRUCTION = `
-Você é um motor de processamento de documentos (IDP) especializado em documentos administrativos públicos brasileiros (Estado do Pará).
-Analise o texto extraído e estruture os dados.
-Identifique o tipo de documento (Requerimento, Atestado, Certidão, etc).
-Extraia campos chave como: Nome, Matrícula, Cargo, Datas, CIDs, etc.
-Sua saída deve ser estritamente um JSON válido.
+const ML_SYSTEM_INSTRUCTION = `
+Você é um especialista em RH Público (Estado do Pará). Analise o documento.
+Classifique EXCLUSIVAMENTE como 'Férias - Administrativo' ou 'Férias - Professor'.
+Extraia as entidades chave: NOME_SERVIDOR, MATRICULA, CARGO, PERIODO_AQUISITIVO, DATA_INICIO, DIAS_GOZO (número).
+Determine o sentimento.
+Forneça a saída estritamente no formato JSON.
 `;
 
-const RAR_SYSTEM_INSTRUCTION = `
-Você é um Agente Especialista em RH Público do Estado do Pará (Lei 5.810/94).
-Analise os dados extraídos (IDP) e os dados de RH (Enriquecimento).
-Aplique as regras fornecidas e emita um veredito justificado.
-`;
+const RESPONSE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    documentType: { type: "STRING" },
+    keyFields: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: { field: { type: "STRING" }, value: { type: "STRING" } }
+      }
+    },
+    nlpResult: {
+      type: "OBJECT",
+      properties: {
+        sentiment: { type: "STRING" },
+        summary: { type: "STRING" }
+      }
+    }
+  }
+};
 
-// --- Serviço Principal: Usa fetch para chamar endpoints Vercel ---
 export const geminiApiService = {
-  
-  // Função utilitária para chamar endpoints Vercel (ou API local)
-  async callEndpoint(endpoint, body) {
+  /**
+   * Processa o documento enviando o Base64 diretamente para o Gemini
+   */
+  async processDocument(base64Content, mimeType = "application/pdf") {
     try {
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
-        
-        if (!response.ok) {
-             const errorBody = await response.text();
-             throw new Error(`API Error: ${response.status} - ${errorBody}`);
+      const model = genAI.getGenerativeModel({
+        model: "gemini-1.5-flash", // Modelo rápido e eficiente
+        systemInstruction: ML_SYSTEM_INSTRUCTION,
+        generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: RESPONSE_SCHEMA
         }
-        return await response.json();
+      });
+
+      const prompt = "Analise este requerimento de férias e extraia os dados solicitados.";
+
+      const result = await model.generateContent([
+        prompt,
+        {
+          inlineData: {
+            data: base64Content,
+            mimeType: mimeType
+          }
+        }
+      ]);
+
+      const response = await result.response;
+      return JSON.parse(response.text());
 
     } catch (error) {
-        console.error("Gemini Service Error:", error);
-        throw error;
+      console.error("Erro na API Gemini:", error);
+      throw new Error("Falha ao processar documento com IA.");
     }
-  },
-
-  // Chamada para ToolsView.vue (Assistente Jurídico)
-  async callGeminiAPI(content, jsonInstruction) {
-    return this.callEndpoint('/api/gemini-juridico', { 
-        prompt: content, 
-        jsonInstruction: jsonInstruction 
-    });
-  },
-
-  // Chamada para DocumentViewer (Geração de Minuta)
-  async generateDraft(context, veredict) {
-    const result = await this.callEndpoint('/api/generate-official-act', {
-        context,
-        veredict
-    });
-    // Assume que a API retorna o texto final dentro da propriedade 'response'
-    return result.response || result;
   }
 };

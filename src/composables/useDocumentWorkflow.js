@@ -13,8 +13,10 @@ export function useDocumentWorkflow() {
   const { user } = useAuth();
 
   const startNewProcess = async (file, processId, userCategory) => {
+    // Validação inicial
+    if (!file) return false;
     if (!file || !user.value) {
-        toast.addToast('Usuário não autenticado ou arquivo inválido.', 'error');
+        toast.addToast('Usuário não autenticado.', 'error');
         return false;
     }
     
@@ -22,7 +24,7 @@ export function useDocumentWorkflow() {
     error.value = null;
  
     try {
-      // 1. Converter arquivo para Base64 (Necessário para o Gemini)
+      // 1. Converter arquivo para Base64 (Necessário para enviar ao Gemini)
       const base64String = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -30,19 +32,22 @@ export function useDocumentWorkflow() {
         reader.onerror = (err) => reject(err);
       });
  
-      // 2. Upload para Supabase Storage (Salvar o PDF)
+      // 2. Upload para Supabase Storage (Salvar o PDF original)
       const fileName = `${user.value.id}/${Date.now()}_${file.name}`;
       const { error: uploadError } = await supabase.storage
         .from('documentos')
         .upload(fileName, file);
-      if (uploadError) throw uploadError;
+      
+      if (uploadError) throw new Error(`Erro upload Supabase: ${uploadError.message}`);
  
+      // Obter URL pública para salvar no banco
       const { data: { publicUrl } } = supabase.storage
         .from('documentos')
         .getPublicUrl(fileName);
  
       // 3. Processamento IA (Backend)
       // Chama a Firebase Function de forma segura
+      toast.addToast('IA analisando documento...', 'info');
       const processDocumentAI = httpsCallable(functions, 'processDocumentWithAI');
       const aiResponse = await processDocumentAI({ base64Content: base64String, mimeType: file.type });
       const idpResult = aiResponse.data;
@@ -50,7 +55,7 @@ export function useDocumentWorkflow() {
       // Adiciona a categoria selecionada pelo usuário ao objeto para validação
       idpResult.categoria_usuario = userCategory;
 
-      // 4. Executar Regras (RAR)
+      // 4. Executar Regras de Negócio (RAR)
       // Busca as regras ativas do banco de dados
       const { data: dbRules } = await supabase.from('regras').select('*');
       
@@ -58,7 +63,7 @@ export function useDocumentWorkflow() {
       const rarResults = executeRAR(idpResult, dbRules || []);
       const finalStatus = determineVerdict(rarResults);
  
-      // 5. Salvar Resultado na Tabela 'processos'
+      // 5. Salvar Tudo no Banco de Dados (Supabase)
       const { error: dbError } = await supabase
         .from('processos')
         .insert([{
@@ -67,19 +72,19 @@ export function useDocumentWorkflow() {
           url_arquivo: publicUrl,
           categoria_usuario: userCategory,
           status: finalStatus,
-          resultado_ia: idpResult,
-          resultado_rar: rarResults // Salva o detalhe da auditoria
+          resultado_ia: idpResult,   // JSON extraído pelo Gemini
+          resultado_rar: rarResults  // JSON da auditoria das regras
         }]);
  
-      if (dbError) throw dbError;
+      if (dbError) throw new Error(`Erro ao salvar no banco: ${dbError.message}`);
  
-      toast.addToast('Documento analisado com sucesso!', 'success');
+      toast.addToast('Documento processado com sucesso!', 'success');
       return true;
  
     } catch (err) {
       error.value = err.message;
-      console.error("Erro no fluxo de trabalho:", err);
-      toast.addToast(`Erro: ${err.message}`, 'error');
+      console.error("Erro no fluxo:", err);
+      toast.addToast(`Falha: ${err.message}`, 'error');
       return false;
     } finally {
       isProcessing.value = false;

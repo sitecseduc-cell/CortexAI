@@ -1,104 +1,51 @@
-Com base nos ficheiros fornecidos, aqui está uma proposta completa de README.md para o projeto Cortex AI.
+# CORTEX AI - Plataforma de Inteligência Governamental
 
-O documento está estruturado para destacar a arquitetura técnica (Vue 3 + Supabase + Gemini AI) e o propósito do negócio (RH Público do Estado do Pará).
+**Cortex AI** é uma plataforma *GovTech* de última geração desenhada para automatizar e agilizar a análise de processos administrativos de Recursos Humanos no setor público.
 
-Cortex AI
-O Cortex AI é uma plataforma de agente autónomo desenvolvida para auxiliar o setor de Recursos Humanos (RH) Público do Estado do Pará. A aplicação automatiza a análise, extração de dados e validação de documentos administrativos (como requerimentos de férias, licenças, etc.) utilizando Inteligência Artificial Generativa.
+A aplicação utiliza Inteligência Artificial Generativa (Gemini 1.5 Flash) para realizar o Processamento Inteligente de Documentos (IDP), validação de regras estatutárias (RAR) e auxílio à tomada de decisão, com foco específico no Estatuto dos Servidores Públicos (atualmente configurado para o Estado do Pará, Brasil).
 
-🚀 Funcionalidades Principais
-Análise de Documentos com IA: Utiliza o Google Gemini (modelo gemini-1.5-flash) para ler ficheiros PDF, classificar o tipo de documento e extrair campos chave (Nome, Matrícula, Cargo, Período Aquisitivo, etc.).
+![Vue.js](https://img.shields.io/badge/vuejs-%2335495e.svg?style=for-the-badge&logo=vuedotjs&logoColor=%234FC08D)
+![Vite](https://img.shields.io/badge/vite-%23646CFF.svg?style=for-the-badge&logo=vite&logoColor=white)
+![Firebase](https://img.shields.io/badge/firebase-%23039BE5.svg?style=for-the-badge&logo=firebase)
+![TailwindCSS](https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=for-the-badge&logo=tailwind-css&logoColor=white)
 
-Processamento de Linguagem Natural: Gera resumos e análises de sentimento dos requerimentos.
+## 🚀 Funcionalidades Principais
 
-Gestão de Processos em Tempo Real: Sincronização imediata de estados dos processos (Raciocínio Pendente, Validação Pendente, Concluído) via Supabase Realtime.
+* **Orquestração de Agentes IA:** Fluxo automatizado que passa por:
+    1.  **IDP (Extração):** Leitura de documentos e extração de campos chave (ex: Nome, Matrícula, Tipo de Documento).
+    2.  **Enriquecimento:** Cruzamento automático com base de dados de servidores.
+    3.  **Raciocínio (Reasoning):** Aplicação de regras legais (ex: verificar se o tempo de serviço permite a licença prêmio).
+* **Validação Humana (Human-in-the-loop):** Interface para os analistas reverem e corrigirem os dados extraídos pela IA antes da conclusão.
+* **Gestão de Regras Dinâmicas:** Módulo para criar e editar regras de negócio (JSON) sem necessidade de alterar o código fonte.
+* **Assistente Jurídico:** Chatbot integrado com conhecimento da legislação (Lei 5.810/94 e PCCR) para tirar dúvidas rápidas.
+* **Dashboard de Performance:** Métricas em tempo real sobre taxas de aprovação, rejeição e volume de processos.
+* **Upload Inteligente:** Suporte para arrastar e largar ficheiros ou utilização de *templates* para testes rápidos.
 
-Validação Humana: Interface para que operadores humanos validem ou corrijam as extrações feitas pela IA antes da aprovação final.
+## 🛠️ Stack Tecnológica
 
-Dashboard Interativo: Visão geral das métricas e lista de processos ativos.
+### Frontend
+* **Framework:** Vue 3 (Composition API)
+* **Build Tool:** Vite
+* **Estilos:** Tailwind CSS
+* **Gestão de Estado:** Pinia
+* **Ícones:** Lucide Vue Next
+* **Visualização PDF:** Vue PDF Embed
 
-Gestão de Regras: Módulo para configuração de regras de negócio aplicáveis aos documentos.
+### Backend (Serverless)
+* **Core:** Firebase (Authentication, Firestore, Hosting)
+* **Compute:** Firebase Cloud Functions (Node.js 22)
+* **AI Model:** Google Generative AI (Gemini 1.5 Flash)
 
-🛠️ Stack Tecnológica
-Frontend: Vue.js 3 (Composition API, <script setup>)
+## ⚙️ Pré-requisitos
 
-Build Tool: Vite
+Antes de começar, certifique-se de que tem instalado:
+* [Node.js](https://nodejs.org/) (Versão 20 ou superior recomendada)
+* [Firebase CLI](https://firebase.google.com/docs/cli) (`npm install -g firebase-tools`)
 
-Estilização: Tailwind CSS com lucide-vue-next para ícones.
+## 📦 Instalação e Configuração
 
-Estado & Router: Pinia e Vue Router.
+### 1. Clonar o Repositório
 
-Backend / BaaS: Supabase (Base de dados, Autenticação e Realtime).
-
-Inteligência Artificial: Google Generative AI SDK (Gemini).
-
-Testes: Vitest.
-
-📂 Estrutura de Base de Dados (Supabase)
-A aplicação depende das seguintes tabelas principais no Supabase:
-
-processos: Armazena os documentos enviados, metadados, status e o resultado JSON da extração da IA.
-
-regras: Armazena as regras de negócio configuráveis pelo utilizador.
-
-⚙️ Configuração e Instalação
-Pré-requisitos
-Node.js (v22.x recomendado)
-
-Uma conta no Supabase.
-
-Uma chave de API do Google Gemini.
-
-Passos para Instalação
-Clonar o repositório:
-
-Bash
-
-git clone https://github.com/seu-usuario/cortex-ai.git
+```bash
+git clone [https://github.com/seu-usuario/cortex-ai.git](https://github.com/seu-usuario/cortex-ai.git)
 cd cortex-ai
-Instalar dependências:
-
-Bash
-
-npm install
-Configurar Variáveis de Ambiente: Crie um ficheiro .env.local na raiz do projeto e preencha com as suas chaves:
-
-Snippet de código
-
-VITE_GEMINI_API_KEY=sua_chave_api_google_gemini
-VITE_SUPABASE_URL=sua_url_do_supabase
-VITE_SUPABASE_ANON_KEY=sua_chave_anonima_do_supabase
-Executar o servidor de desenvolvimento:
-
-Bash
-
-npm run dev
-📜 Scripts Disponíveis
-De acordo com o package.json:
-
-npm run dev: Inicia o servidor de desenvolvimento local.
-
-npm run build: Compila a aplicação para produção.
-
-npm run preview: Visualiza a build de produção localmente.
-
-npm run test: Executa os testes unitários com Vitest.
-
-🧩 Estrutura do Projeto
-src/services/geminiService.js: Lógica de integração com a IA, incluindo os prompts de sistema para o contexto de RH.
-
-src/libs/supabase.js: Inicialização do cliente Supabase.
-
-src/composables/useFirestore.js: Hook (nomeado por legado, mas utiliza Supabase) para abstração de chamadas à base de dados com suporte a live updates.
-
-src/views/PlatformView.vue: Layout principal que orquestra o Dashboard, Visualizador de Documentos e Menus.
-
-🤝 Contribuição
-Faça um Fork do projeto.
-
-Crie uma Branch para a sua Feature (git checkout -b feature/NovaFuncionalidade).
-
-Faça o Commit das suas alterações (git commit -m 'Adiciona NovaFuncionalidade').
-
-Faça o Push para a Branch (git push origin feature/NovaFuncionalidade).
-
-Abra um Pull Request.

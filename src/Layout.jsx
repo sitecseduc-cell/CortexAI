@@ -1,8 +1,9 @@
 
 import React from 'react';
 import { useTheme } from './contexts/ThemeContext';
-import { Sun, Moon, Home, Settings, User, Box } from 'lucide-react';
+import { Sun, Moon, Home, Settings, Scale, Box } from 'lucide-react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
+import brasao from './assets/brasao.png';
 
 const SidebarItem = ({ icon: Icon, label, to }) => (
     <NavLink
@@ -43,16 +44,14 @@ const Layout = ({ children }) => {
             <aside className="fixed left-0 top-0 bottom-0 w-20 md:w-64 border-r border-slate-200/50 dark:border-slate-800/50 z-40
                          bg-white/70 dark:bg-slate-900/60 backdrop-blur-2xl transition-all duration-300">
                 <div className="p-6 flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/20">
-                        C
-                    </div>
+                    <img src={brasao} alt="Brasão" className="w-8 h-auto object-contain drop-shadow-md" />
                     <span className="font-bold text-xl text-slate-800 dark:text-white hidden md:block">Cortex AI</span>
                 </div>
 
                 <nav className="p-4 space-y-2">
                     <SidebarItem icon={Home} label="Dashboard" to="/" />
                     <SidebarItem icon={Box} label="Processos" to="/processes" />
-                    <SidebarItem icon={User} label="Jurisprudência" to="/jurisprudence" />
+                    <SidebarItem icon={Scale} label="Jurisprudência" to="/jurisprudence" />
                     <SidebarItem icon={Settings} label="Configurações" to="/settings" />
                 </nav>
             </aside>

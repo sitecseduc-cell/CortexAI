@@ -9,6 +9,8 @@ import { DataProvider } from './contexts/DataContext';
 /* Pages */
 import Dashboard from './pages/Dashboard';
 import Processes from './pages/Processes';
+import Jurisprudence from './pages/Jurisprudence';
+import Settings from './pages/Settings';
 
 /* Placeholder Pages */
 const PlaceholderPage = ({ title }) => (
@@ -39,8 +41,8 @@ function App() {
                     <Routes>
                         <Route path="/" element={<Dashboard />} />
                         <Route path="/processes" element={<Processes />} />
-                        <Route path="/jurisprudence" element={<PlaceholderPage title="Base de Jurisprudência" />} />
-                        <Route path="/settings" element={<PlaceholderPage title="Configurações do Agente" />} />
+                        <Route path="/jurisprudence" element={<Jurisprudence />} />
+                        <Route path="/settings" element={<Settings />} />
                         <Route path="*" element={<Navigate to="/" />} />
                     </Routes>
                 </Layout>

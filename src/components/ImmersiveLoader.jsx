@@ -15,7 +15,7 @@ const ImmersiveLoader = () => {
     useEffect(() => {
         const interval = setInterval(() => {
             setCurrentMessageIndex((prev) => (prev + 1) % messages.length);
-        }, 2000);
+        }, 1500);
         return () => clearInterval(interval);
     }, []);
 
@@ -24,49 +24,44 @@ const ImmersiveLoader = () => {
 
             {/* Background Glows */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-500/20 rounded-full blur-[100px] animate-pulse"></div>
-                <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-violet-500/20 rounded-full blur-[100px] animate-pulse delay-700"></div>
+                <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[100px] animate-pulse"></div>
+                <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-violet-500/10 rounded-full blur-[100px] animate-pulse delay-700"></div>
             </div>
 
-            {/* Hexagon Spinner */}
-            <div className="relative w-24 h-24 mb-8">
-                <svg viewBox="0 0 100 100" className="w-full h-full animate-spin [animation-duration:3s]">
-                    <path
-                        d="M50 5 L95 27.5 L95 72.5 L50 95 L5 72.5 L5 27.5 Z"
-                        fill="none"
-                        stroke="url(#gradient)"
-                        strokeWidth="4"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]"
-                    />
-                    <defs>
-                        <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor="#6366f1" /> {/* indigo-500 */}
-                            <stop offset="100%" stopColor="#8b5cf6" /> {/* violet-500 */}
-                        </linearGradient>
-                    </defs>
-                </svg>
+            {/* Modern Circular Spinner */}
+            <div className="relative w-20 h-20 mb-8 flex items-center justify-center">
+
+                {/* Outer Ring */}
+                <div className="absolute inset-0 rounded-full border-4 border-slate-200 dark:border-slate-800 opacity-30"></div>
+
+                {/* Spinning Gradient Ring */}
+                <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-indigo-500 border-r-violet-500 animate-spin [animation-duration:1s]"></div>
 
                 {/* Inner Pulse */}
-                <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-12 h-12 bg-indigo-500/10 rounded-full animate-ping"></div>
-                </div>
+                <div className="absolute w-2 h-2 bg-indigo-500 rounded-full animate-ping"></div>
+
+                {/* Optional: Glow effect behind */}
+                <div className="absolute inset-0 bg-indigo-500/20 blur-xl rounded-full"></div>
             </div>
 
             {/* Text */}
-            <div className="relative h-8 overflow-hidden w-64 text-center">
+            <div className="relative h-8 overflow-hidden w-72 text-center z-10">
                 {messages.map((msg, index) => (
                     <div
                         key={index}
                         className={`absolute inset-0 flex items-center justify-center text-sm font-medium text-slate-600 dark:text-slate-300 transition-all duration-500 transform ${index === currentMessageIndex
-                                ? 'opacity-100 translate-y-0'
-                                : 'opacity-0 translate-y-4'
+                            ? 'opacity-100 translate-y-0 scale-100'
+                            : 'opacity-0 translate-y-4 scale-95'
                             }`}
                     >
                         {msg}
                     </div>
                 ))}
+            </div>
+
+            {/* Progress Bar (Visual only) */}
+            <div className="w-48 h-1 bg-slate-200 dark:bg-slate-800 rounded-full mt-6 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 w-1/2 animate-[progress_2s_ease-in-out_infinite]"></div>
             </div>
         </div>
     );
